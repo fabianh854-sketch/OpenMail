@@ -1,0 +1,23 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Tauri und Leptos (Build-Ausgaben)
+/src-tauri/gen/
+/src-tauri/target/
+/ui/dist/
+/ui/target/
+node_modules/
+
+# Geheimnisse und lokale Konfiguration (nie einchecken)
+.env
+.env.*
+*.pem
+*.key
+
+# Betriebssystem und Editor
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
