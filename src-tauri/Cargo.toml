@@ -1,0 +1,31 @@
+[package]
+name = "openmail-app"
+description = "OpenMail Desktop-Shell (Tauri v2)"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+openmail-core = { path = "../crates/openmail-core" }
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "deny"
+indexing_slicing = "warn"
+arithmetic_side_effects = "warn"
+cast_possible_truncation = "warn"
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+overflow-checks = true
+strip = true
