@@ -1,0 +1,33 @@
+[workspace]
+resolver = "2"
+# `src-tauri` (Tauri v2) und `ui` (Leptos) kommen als Mitglieder dazu, sobald
+# trunk, cargo-tauri und das wasm32-Target installiert sind (siehe README.md).
+members = ["crates/openmail-core"]
+exclude = ["src-tauri", "ui"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+
+[workspace.dependencies]
+serde = { version = "1", default-features = false, features = ["derive", "std"] }
+serde_json = "1"
+thiserror = "2"
+uuid = { version = "1", default-features = false, features = ["v4"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "deny"
+indexing_slicing = "warn"
+arithmetic_side_effects = "warn"
+cast_possible_truncation = "warn"
+undocumented_unsafe_blocks = "deny"
+
+[profile.release]
+overflow-checks = true
+strip = true

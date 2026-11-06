@@ -1,0 +1,18 @@
+[package]
+name = "openmail-core"
+description = "Domänenmodell, Validierung, Erweiterungspunkte und Befehlsschicht von OpenMail"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true
