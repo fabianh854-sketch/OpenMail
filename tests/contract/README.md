@@ -44,8 +44,7 @@ python3 tests/contract/check_contract.py --report-only   # immer Exit-Code 0
 ```
 
 - `"expect": "accept"` – Rust muss die Nutzlast annehmen. Lehnt Rust ab, ist das ein Widerspruch
-  (z. B. `save_contact_without_email.json`: offene Entscheidung, ob der Prototyp `null` sendet oder
-  Rust `""` als „keine Adresse“ liest).
+  (z. B. `save_contact_without_email.json`: Rust liest `""` als „keine Adresse“).
 - `"expect": "reject"` – der Prototyp erzeugt die Nutzlast heute, sie ist aber ungültig; Rusts
   Ablehnung ist gewollt, der Fehler liegt im Prototyp. Wird als „PROTOTYP-BUG“ berichtet, nicht als
   Widerspruch (z. B. `save_event_start_cleared.json`, `save_filter_label_without_categories.json`).

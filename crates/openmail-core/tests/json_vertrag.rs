@@ -170,10 +170,33 @@ fn contact_email_null_bedeutet_keine_adresse() -> TestResult {
 /// Das Kontaktformular des Prototyps (`fluent-mail.html`, `collect()` + `save_contact`) schickt
 /// ein leeres Feld als `""`, nicht als `null`. Ein Kontakt ohne Adresse muss speicherbar sein.
 #[test]
-#[ignore = "Bug: Contact lehnt \"email\": \"\" aus dem Formular ab statt es als keine Adresse zu werten"]
 fn contact_leere_email_aus_dem_formular_ist_keine_adresse() -> TestResult {
-    let contact: Contact = serde_json::from_value(with(&full_contact(), "email", json!("")))?;
+    for leer in [json!(""), json!("   "), Value::Null] {
+        let contact: Contact = serde_json::from_value(with(&full_contact(), "email", leer))?;
+        assert!(contact.email.is_none());
+    }
+    let mut ohne = full_contact();
+    if let Some(o) = ohne.as_object_mut() {
+        o.remove("email");
+    }
+    let contact: Contact = serde_json::from_value(ohne)?;
     assert!(contact.email.is_none());
+    // Umgebender Leerraum wird wie bei `Email::try_from` entfernt.
+    let getrimmt: Contact =
+        serde_json::from_value(with(&full_contact(), "email", json!("  a@b.de ")))?;
+    assert_eq!(getrimmt.email.as_ref().map(|e| e.as_str()), Some("a@b.de"));
+    for falsch in [
+        json!("kein-at"),
+        json!(42),
+        json!("\u{1c}"),
+        json!(["a@b.de"]),
+    ] {
+        assert!(
+            serde_json::from_value::<Contact>(with(&full_contact(), "email", falsch.clone()))
+                .is_err(),
+            "{falsch}"
+        );
+    }
     Ok(())
 }
 

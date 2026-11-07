@@ -224,12 +224,27 @@ pub enum RuleOp {
     Starts,
 }
 
+/// Liest eine optionale E-Mail-Adresse: `null`, leer oder nur Whitespace (so sendet das
+/// Kontaktformular ein leeres Feld) ergibt `None`; alles andere muss eine gültige Adresse sein.
+fn optionale_email<'de, D>(deserializer: D) -> Result<Option<Email>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    match Option::<String>::deserialize(deserializer)? {
+        None => Ok(None),
+        Some(s) if s.trim().is_empty() => Ok(None),
+        Some(s) => Email::try_from(s)
+            .map(Some)
+            .map_err(serde::de::Error::custom),
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Contact {
     pub id: Id,
     pub name: Name,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "optionale_email")]
     pub email: Option<Email>,
     #[serde(default)]
     pub phone: Text,

@@ -35,6 +35,18 @@ FIXTURES = Path(__file__).resolve().parent / "fixtures"
 INJECTED_TYPES = ("State<", "AppHandle", "Window", "WebviewWindow", "Webview", "Request<", "Channel<")
 
 
+
+def rust_trim(text: str) -> str:
+    """Wie Rusts `str::trim`: entfernt Unicode-White_Space. Pythons `strip()` entfernt zusätzlich
+    die Trennzeichen U+001C–U+001F, die Rust nicht als Leerraum zählt."""
+    keep = "\x1c\x1d\x1e\x1f"
+    start, end = 0, len(text)
+    while start < end and text[start].isspace() and text[start] not in keep:
+        start += 1
+    while end > start and text[end - 1].isspace() and text[end - 1] not in keep:
+        end -= 1
+    return text[start:end]
+
 class ParseError(Exception):
     """Eine erwartete Stelle wurde in den Quellen nicht gefunden."""
 
@@ -613,6 +625,8 @@ class Validator:
                 if not f.optional:
                     errs.append(f"{path}.{jn}: Pflichtfeld fehlt")
                 continue
+            if name == "Contact" and jn == "email" and (obj[jn] is None or (isinstance(obj[jn], str) and not rust_trim(obj[jn]))):
+                continue  # deserialize_with: leer/Whitespace gilt als keine Adresse (None)
             errs += self.value(f.ty, obj[jn], f"{path}.{jn}")
         if not errs:
             errs += self.cross_field(name, obj, path)
