@@ -92,18 +92,30 @@ fn paralleles_schreiben_und_lesen_ergibt_konsistenten_bestand() -> TestResult {
 fn konkurrierende_updates_derselben_kennung() -> TestResult {
     let api = Api::new();
     let written: Vec<String> = (0..THREADS).map(|t| format!("Version {t}")).collect();
+    let ok = AtomicUsize::new(0);
+    let failed = AtomicUsize::new(0);
     std::thread::scope(|s| {
         for name in &written {
-            let api = &api;
+            let (api, ok, failed) = (&api, &ok, &failed);
             s.spawn(move || {
                 for _ in 0..PER_THREAD {
-                    if let Ok(c) = contact("p1", name) {
-                        let _ = api.save_contact(c);
-                    }
+                    let saved = contact("p1", name)
+                        .map_err(|e| e.to_string())
+                        .and_then(|c| api.save_contact(c).map_err(|e| e.to_string()));
+                    match saved {
+                        Ok(_) => ok.fetch_add(1, Ordering::SeqCst),
+                        Err(_) => failed.fetch_add(1, Ordering::SeqCst),
+                    };
                 }
             });
         }
     });
+    // Überschreiben derselben Kennung darf nie scheitern.
+    assert_eq!(failed.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        ok.load(Ordering::SeqCst),
+        THREADS.saturating_mul(PER_THREAD)
+    );
     let list = api.list_contacts()?;
     assert_eq!(list.len(), 1);
     let final_name = list
@@ -139,6 +151,7 @@ fn limit_wird_unter_konkurrenz_nicht_ueberschritten() -> TestResult {
             });
         }
     });
+    assert!(ok.load(Ordering::SeqCst) > 0);
     assert_eq!(ok.load(Ordering::SeqCst), LIMIT);
     assert_eq!(
         full.load(Ordering::SeqCst),
@@ -154,25 +167,68 @@ fn limit_mit_gleichzeitigem_loeschen() -> TestResult {
     const LIMIT: usize = 8;
     let store: Collection<Contact> = Collection::new(LIMIT);
     let max_seen = AtomicUsize::new(0);
+    let inserted = AtomicUsize::new(0);
+    let full = AtomicUsize::new(0);
+    let removed = AtomicUsize::new(0);
+    let unexpected = AtomicUsize::new(0);
     std::thread::scope(|s| {
         for t in 0..THREADS {
-            let (store, max_seen) = (&store, &max_seen);
+            let (store, max_seen, inserted, full, removed, unexpected) =
+                (&store, &max_seen, &inserted, &full, &removed, &unexpected);
             s.spawn(move || {
                 for i in 0..50 {
                     let key = format!("t{t}-{i}");
-                    if let Ok(c) = contact(&key, "X") {
-                        let _ = store.upsert(c);
+                    let (Ok(c), Ok(k)) = (contact(&key, "X"), id(&key)) else {
+                        unexpected.fetch_add(1, Ordering::SeqCst);
+                        continue;
+                    };
+                    let stored = match store.upsert(c) {
+                        Ok(_) => {
+                            inserted.fetch_add(1, Ordering::SeqCst);
+                            true
+                        }
+                        Err(AppError::LimitReached(_)) => {
+                            full.fetch_add(1, Ordering::SeqCst);
+                            false
+                        }
+                        Err(_) => {
+                            unexpected.fetch_add(1, Ordering::SeqCst);
+                            false
+                        }
+                    };
+                    match store.list() {
+                        Ok(list) => {
+                            max_seen.fetch_max(list.len(), Ordering::SeqCst);
+                        }
+                        Err(_) => {
+                            unexpected.fetch_add(1, Ordering::SeqCst);
+                        }
                     }
-                    if let Ok(list) = store.list() {
-                        max_seen.fetch_max(list.len(), Ordering::SeqCst);
-                    }
-                    if let Ok(k) = id(&key) {
-                        let _ = store.remove(&k);
+                    // Nur dieser Thread löscht diesen Schlüssel: Gespeichertes muss sich löschen
+                    // lassen, nicht Gespeichertes muss NotFound liefern.
+                    match (stored, store.remove(&k)) {
+                        (true, Ok(())) => {
+                            removed.fetch_add(1, Ordering::SeqCst);
+                        }
+                        (false, Err(AppError::NotFound)) => {}
+                        _ => {
+                            unexpected.fetch_add(1, Ordering::SeqCst);
+                        }
                     }
                 }
             });
         }
     });
+    let inserted = inserted.load(Ordering::SeqCst);
+    assert_eq!(unexpected.load(Ordering::SeqCst), 0);
+    assert!(inserted > 0);
+    // Da gleichzeitig gelöscht wird, sind insgesamt mehr Erfolge als LIMIT möglich;
+    // gleichzeitig belegt waren aber nie mehr als LIMIT Plätze.
+    assert_eq!(
+        inserted.saturating_add(full.load(Ordering::SeqCst)),
+        THREADS.saturating_mul(50)
+    );
+    assert_eq!(removed.load(Ordering::SeqCst), inserted);
     assert!(max_seen.load(Ordering::SeqCst) <= LIMIT);
     assert!(store.list()?.is_empty());
     Ok(())

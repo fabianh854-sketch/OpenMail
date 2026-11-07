@@ -74,6 +74,18 @@ cargo deny check
 cargo audit --deny warnings
 ```
 
+## Tests
+
+| Ebene | Ordner | Start |
+| --- | --- | --- |
+| Rust-Kern, Unit-Tests | `crates/openmail-core/src/tests.rs` | `cargo test -p openmail-core` |
+| Rust-Kern, Integrationstests (Blackbox über die öffentliche API) | `crates/openmail-core/tests/` | `cargo test -p openmail-core` |
+| Vertrag Oberfläche ↔ Backend (statisch, mit Fixtures aus dem Prototyp) | `tests/contract/` | `python3 tests/contract/check_contract.py` |
+| Prototyp im Browser (Playwright/Chromium) | `tests/e2e/` | `node tests/e2e/run.cjs` |
+
+Gefundene, noch nicht behobene Fehler sind als `#[ignore = "Bug: …"]` (Rust) bzw. Status `BEKANNT` (E2E)
+markiert, damit die Suites grün bleiben. Details in den READMEs der Ordner.
+
 ## Sicherheit
 
 - Lints im Workspace: `unsafe_code = "forbid"`, `unwrap_used`/`panic` verboten, Release mit `overflow-checks`.
