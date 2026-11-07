@@ -1,5 +1,6 @@
 {
   "source": "fluent-mail.html:3942 editPerson (neuer Kontakt)",
+  "expect": "accept",
   "command": "save_contact",
   "args": {
     "contact": {

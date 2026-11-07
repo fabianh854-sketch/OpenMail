@@ -1,5 +1,6 @@
 {
   "source": "fluent-mail.html:3730 ensureExtras (Startfilter)",
+  "expect": "accept",
   "command": "save_filter",
   "args": {
     "filter": {

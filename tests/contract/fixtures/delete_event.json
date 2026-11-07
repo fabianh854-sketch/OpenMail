@@ -1,5 +1,6 @@
 {
   "source": "fluent-mail.html:4171 editEvent (Löschen)",
+  "expect": "accept",
   "command": "delete_event",
   "args": {
     "id": "emhp3k1x26"

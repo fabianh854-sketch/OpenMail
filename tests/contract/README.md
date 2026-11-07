@@ -22,28 +22,45 @@ python3 tests/contract/check_contract.py --report-only   # immer Exit-Code 0
 
 ## Exit-Codes
 
-- `0` – nur erwartete Lücken: Befehle aus `BACKEND_COMMANDS`, die in `main.rs` noch fehlen, stehen unter „OFFEN“.
-- `1` – mindestens ein Widerspruch bei einem **implementierten** Command (falscher Argumentname,
-  Feld, das Rust ablehnt, fehlendes Pflichtfeld, Fixture, die Rust ablehnen würde, Command nicht registriert …).
-- `2` – eine erwartete Stelle wurde in den Quellen nicht gefunden (Parser anpassen).
+- `0` – keine Widersprüche. Erwartete Lücken stehen trotzdem im Bericht:
+  „OFFEN“ (Befehle aus `BACKEND_COMMANDS`, die in `main.rs` noch fehlen), „PROTOTYP-BUG“
+  (Fixtures mit `"expect": "reject"`, die Rust zu Recht ablehnt) und „WARNUNG“ (u. a. Konstrukte in
+  `types.rs`, die der Test nicht abbildet, z. B. Tupel-Varianten).
+- `1` – mindestens ein Widerspruch bei einem **implementierten** Command: falscher Argumentname,
+  Feld, das Rust ablehnt, fehlendes Pflichtfeld, Fixture mit `"expect": "accept"`, die Rust ablehnt
+  (oder `"reject"`, die Rust annimmt), Command nicht registriert …
+- `2` – eine erwartete Stelle wurde nicht gefunden oder lieferte 0 Treffer (keine `commit`-Aufrufe,
+  leeres `BACKEND_COMMANDS`, keine erzeugten Kontakt-/Termin-/Aufgaben-/Filter-Objekte, leere
+  Auswahlliste, Editorfunktion fehlt …). Dann den Parser anpassen.
 
 ## Fixtures
 
 `fixtures/*.json` sind Nutzlasten genau so, wie der Prototyp sie an `backend.invoke` übergibt:
 
 ```json
-{ "source": "fluent-mail.html:4496 …", "severity": "hoch|mittel|niedrig (nur bei bekannten Problemen)",
+{ "source": "fluent-mail.html:4496 …", "expect": "accept|reject",
+  "severity": "hoch|mittel|niedrig (nur bei bekannten Problemen)", "note": "…",
   "command": "save_task", "args": { "task": { … } } }
 ```
 
+- `"expect": "accept"` – Rust muss die Nutzlast annehmen. Lehnt Rust ab, ist das ein Widerspruch
+  (z. B. `save_contact_without_email.json`: offene Entscheidung, ob der Prototyp `null` sendet oder
+  Rust `""` als „keine Adresse“ liest).
+- `"expect": "reject"` – der Prototyp erzeugt die Nutzlast heute, sie ist aber ungültig; Rusts
+  Ablehnung ist gewollt, der Fehler liegt im Prototyp. Wird als „PROTOTYP-BUG“ berichtet, nicht als
+  Widerspruch (z. B. `save_event_start_cleared.json`, `save_filter_label_without_categories.json`).
+
 `args` lässt sich direkt in Rust-Tests verwenden, z. B.
 `serde_json::from_value::<Task>(fixture["args"]["task"].clone())`. Fixtures mit `severity`
-beschreiben Eingaben, die der Prototyp heute erzeugt, Rust aber ablehnt – sie sind Bugs, keine
-Negativtests, und lassen den Test fehlschlagen, bis Prototyp oder Kern angepasst sind.
+und `expect` beschreiben bekannte Probleme; Rust-Tests sollten `expect` übernehmen
+(accept → `Ok`, reject → `Err`).
 
 ## Grenzen
 
-- Statische Analyse mit regulären Ausdrücken und Klammerabgleich, kein JS-/Rust-Parser. Ändert sich der
+- Statische Analyse mit regulären Ausdrücken und Klammerabgleich, kein JS-/Rust-Parser. JS-Strings in
+  einfachen und doppelten Anführungszeichen werden erkannt, Leerzeichen sind beliebig. In `types.rs`
+  werden Kommentare vorher entfernt, `default`/`rename`/`deny_unknown_fields` nur aus `#[serde(…)]`
+  gelesen und Felder mit Kommas in Generics (`HashMap<K, V>`) korrekt getrennt. Ändert sich der
   Aufbau stark (z. B. `uid()`, `formDialog`, Namen der Editorfunktionen), meldet das Skript Exit-Code 2
   oder eine Warnung „nicht auflösbar“.
 - Werte werden nur geprüft, wo sie im Prototyp als Literal stehen; Werte aus Formularen prüfen die Fixtures.

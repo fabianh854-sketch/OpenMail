@@ -1,5 +1,6 @@
 {
   "source": "fluent-mail.html:3938 editPerson (Löschen)",
+  "expect": "accept",
   "command": "delete_contact",
   "args": {
     "id": "pmhp3k1x24"

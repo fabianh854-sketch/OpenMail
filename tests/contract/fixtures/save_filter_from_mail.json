@@ -1,5 +1,6 @@
 {
   "source": "fluent-mail.html:3140 + 4729 editFilter mit preset.from",
+  "expect": "accept",
   "command": "save_filter",
   "args": {
     "filter": {

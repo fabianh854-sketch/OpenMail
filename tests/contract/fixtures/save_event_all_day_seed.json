@@ -1,5 +1,6 @@
 {
   "source": "fluent-mail.html:3669 ensureExtras/ev (Feiertag)",
+  "expect": "accept",
   "command": "save_event",
   "args": {
     "event": {

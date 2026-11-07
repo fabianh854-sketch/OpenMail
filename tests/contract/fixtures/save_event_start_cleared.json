@@ -1,6 +1,8 @@
 {
   "source": "fluent-mail.html:4161 editEvent, Beginn-Feld geleert: fromInput('') liefert null, validate() lässt null<null durch",
+  "expect": "reject",
   "severity": "mittel",
+  "note": "Prototyp-Bug: der Dialog muss das verhindern; Rusts Ablehnung ist gewollt.",
   "command": "save_event",
   "args": {
     "event": {

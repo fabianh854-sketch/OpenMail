@@ -1,6 +1,8 @@
 {
   "source": "fluent-mail.html:3942 editPerson, E-Mail-Feld leer gelassen (optional im Formular)",
+  "expect": "accept",
   "severity": "hoch",
+  "note": "Offene Entscheidung: Prototyp sendet \"\" statt null, oder Rust liest \"\" als None. Bis dahin Widerspruch.",
   "command": "save_contact",
   "args": {
     "contact": {

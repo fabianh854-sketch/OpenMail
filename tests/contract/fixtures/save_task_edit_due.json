@@ -1,5 +1,6 @@
 {
   "source": "fluent-mail.html:4430 editTask (neue Aufgabe mit Fälligkeit)",
+  "expect": "accept",
   "command": "save_task",
   "args": {
     "task": {

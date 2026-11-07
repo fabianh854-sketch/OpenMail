@@ -1,6 +1,8 @@
 {
   "source": "fluent-mail.html:4739 editFilter: Aktion 'label' bei leerer Kategorienliste setzt value = undefined (fällt in JSON weg)",
+  "expect": "reject",
   "severity": "niedrig",
+  "note": "Prototyp-Bug: der Dialog muss das verhindern; Rusts Ablehnung ist gewollt.",
   "command": "save_filter",
   "args": {
     "filter": {

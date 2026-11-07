@@ -1,5 +1,6 @@
 {
   "source": "fluent-mail.html:3652 ensureExtras (Startdaten)",
+  "expect": "accept",
   "command": "save_contact",
   "args": {
     "contact": {

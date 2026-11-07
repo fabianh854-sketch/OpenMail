@@ -47,6 +47,7 @@ class Report:
     errors: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     open_items: list[str] = field(default_factory=list)
+    proto_bugs: list[str] = field(default_factory=list)  # zählen nicht als Widerspruch
     ok: list[str] = field(default_factory=list)
 
     def print(self, verbose: bool) -> None:
@@ -58,12 +59,13 @@ class Report:
         if verbose:
             block("OK", self.ok)
         block("OFFEN (noch nicht implementiert, erwartet)", self.open_items)
+        block("PROTOTYP-BUG (Rust lehnt zu Recht ab, kein Widerspruch)", self.proto_bugs)
         block("WARNUNG", self.warnings)
         block("WIDERSPRUCH (Fehler)", self.errors)
         print()
         print(
             f"Ergebnis: {len(self.errors)} Widersprüche, {len(self.warnings)} Warnungen, "
-            f"{len(self.open_items)} offen, {len(self.ok)} ok"
+            f"{len(self.proto_bugs)} Prototyp-Bugs, {len(self.open_items)} offen, {len(self.ok)} ok"
         )
 
 
@@ -204,7 +206,7 @@ def js_function_body(src: str, name: str) -> tuple[int, str]:
 
 def form_field_keys(body: str) -> list[str]:
     """Schlüssel aus formDialog({ fields: [{ key: '…' }, …] })."""
-    return re.findall(r"\{\s*key:\s*'([^']+)'", body)
+    return [m.group(2) for m in re.finditer(r"""\{\s*key\s*:\s*(['"])([^'"]+)\1""", body)]
 
 
 # --------------------------------------------------------------------------- Rust
@@ -225,38 +227,134 @@ class RustStruct:
     fields: dict[str, RustField]  # json_name -> Feld
 
 
-def parse_types(src: str) -> tuple[dict[str, RustStruct], dict[str, list[str]], dict[str, dict[str, list[str]]], dict[str, int]]:
-    """Structs, einfache Enums (Variantennamen in JSON-Form), getaggte Enums und Konstanten."""
+def strip_rust_comments(src: str) -> str:
+    """Entfernt //- und /* */-Kommentare (Doc-Kommentare eingeschlossen), Strings bleiben erhalten."""
+    out, i, n = [], 0, len(src)
+    while i < n:
+        if src[i] == '"':
+            j = i + 1
+            while j < n and src[j] != '"':
+                j += 2 if src[j] == "\\" else 1
+            out.append(src[i : j + 1])
+            i = j + 1
+        elif src.startswith("//", i):
+            nl = src.find("\n", i)
+            i = n if nl < 0 else nl
+        elif src.startswith("/*", i):
+            close = src.find("*/", i + 2)
+            i = n if close < 0 else close + 2
+        else:
+            out.append(src[i])
+            i += 1
+    return "".join(out)
+
+
+def serde_args(attrs: str) -> str:
+    """Inhalt aller `#[serde(...)]`-Attribute, durch Kommas verbunden (andere Attribute zählen nicht)."""
+    found = []
+    for m in re.finditer(r"#\[\s*serde\s*\(", attrs):
+        open_paren = m.end() - 1
+        found.append(attrs[open_paren + 1 : match_bracket(attrs, open_paren, rust=True)])
+    return ",".join(found)
+
+
+def serde_flag(args: str, flag: str) -> bool:
+    return any(part.strip() == flag for part in split_top_level(args, rust=True))
+
+
+def serde_value(args: str, key: str) -> str | None:
+    for part in split_top_level(args, rust=True):
+        m = re.fullmatch(rf'{key}\s*=\s*"([^"]*)"', part.strip())
+        if m:
+            return m.group(1)
+    return None
+
+
+def split_attrs(part: str) -> tuple[str, str]:
+    """Trennt führende `#[...]`-Attribute von der Deklaration."""
+    rest, attrs = part.strip(), []
+    while rest.startswith("#["):
+        close = match_bracket(rest, 1, rust=True)
+        attrs.append(rest[: close + 1])
+        rest = rest[close + 1 :].strip()
+    return " ".join(attrs), rest
+
+
+def parse_types(src: str) -> tuple[dict[str, RustStruct], dict[str, list[str]], dict[str, dict[str, list[str]]], dict[str, int], list[str]]:
+    """Structs, einfache Enums (Varianten in JSON-Form), getaggte Enums, Konstanten und Hinweise.
+
+    Hinweise nennen Konstrukte, die der Test nicht abbildet (Tupel-Varianten, Unit-Varianten in
+    getaggten Enums, Struct-Varianten in einfachen Enums) – sie werden gemeldet, nicht verworfen.
+    """
+    src = strip_rust_comments(src)
     consts = {m.group(1): int(m.group(2).replace("_", "")) for m in re.finditer(r"pub const (\w+): \w+ = (-?[\d_]+);", src)}
     structs: dict[str, RustStruct] = {}
     simple_enums: dict[str, list[str]] = {}
     tagged_enums: dict[str, dict[str, list[str]]] = {}
-    item_re = re.compile(r"((?:#\[[^\]]*\]\s*)*)pub (struct|enum) (\w+)\s*\{", re.S)
+    notes: list[str] = []
+    item_re = re.compile(r"((?:#\[[^\]]*\]\s*)*)pub (struct|enum) (\w+)\s*(?:<[^>{]*>)?\s*\{", re.S)
     for m in item_re.finditer(src):
-        attrs, kind, name = m.group(1), m.group(2), m.group(3)
+        kind, name = m.group(2), m.group(3)
+        args = serde_args(m.group(1))
         body = src[m.end() : match_bracket(src, m.end() - 1, rust=True)]
-        rename_all = re.search(r'rename_all\s*=\s*"(\w+)"', attrs)
-        rename_all = rename_all.group(1) if rename_all else None
+        rename_all = serde_value(args, "rename_all")
+
+        def jname(v: str) -> str:
+            if rename_all == "lowercase":
+                return v.lower()
+            if rename_all == "camelCase":
+                return snake_to_camel(v)
+            return v
+
         if kind == "struct":
             fields = {}
-            for fm in re.finditer(r"((?:#\[[^\]]*\]\s*|///[^\n]*\n\s*)*)pub (\w+):\s*([^,\n]+),", body):
-                fattrs, fname, fty = fm.group(1), fm.group(2), fm.group(3).strip()
-                rn = re.search(r'rename\s*=\s*"([^"]+)"', fattrs)
-                json_name = rn.group(1) if rn else (snake_to_camel(fname) if rename_all == "camelCase" else fname)
-                optional = "default" in fattrs or fty.startswith("Option<")
+            for part in split_top_level(body, rust=True):
+                fattrs, decl = split_attrs(part)
+                fm = re.fullmatch(r"(?:pub(?:\([^)]*\))?\s+)?(\w+)\s*:\s*(.+)", decl.strip(), re.S)
+                if not fm:
+                    notes.append(f"types.rs {name}: Feld nicht verstanden: {decl.strip()[:40]!r}")
+                    continue
+                fname, fty = fm.group(1), re.sub(r"\s+", " ", fm.group(2).strip())
+                fargs = serde_args(fattrs)
+                if serde_flag(fargs, "skip") or serde_flag(fargs, "flatten"):
+                    notes.append(f"types.rs {name}.{fname}: skip/flatten wird nicht abgebildet")
+                rn = serde_value(fargs, "rename")
+                json_name = rn or (snake_to_camel(fname) if rename_all == "camelCase" else fname)
+                optional = serde_flag(fargs, "default") or serde_value(fargs, "default") is not None or fty.startswith("Option<")
                 fields[json_name] = RustField(fname, json_name, fty, optional)
-            structs[name] = RustStruct(name, "deny_unknown_fields" in attrs, fields)
-        else:
-            variants = re.findall(r"^\s*(\w+)\s*(\{[^}]*\})?\s*,", body, re.M)
-            def jname(v: str) -> str:
-                return v.lower() if rename_all == "lowercase" else v
-            if "tag =" in attrs:
-                tagged_enums[name] = {
-                    jname(v): re.findall(r"(\w+):", inner or "") for v, inner in variants
-                }
+            structs[name] = RustStruct(name, serde_flag(args, "deny_unknown_fields"), fields)
+            continue
+        tagged = serde_value(args, "tag") is not None
+        variants: dict[str, list[str]] = {}
+        simple: list[str] = []
+        for part in split_top_level(body, rust=True):
+            vattrs, decl = split_attrs(part)
+            vm = re.fullmatch(r"(\w+)\s*(\{.*\}|\(.*\))?\s*(?:=\s*-?\d+)?", decl, re.S)
+            if not vm:
+                notes.append(f"types.rs {name}: Variante nicht verstanden: {decl[:40]!r}")
+                continue
+            vname = serde_value(serde_args(vattrs), "rename") or jname(vm.group(1))
+            shape = vm.group(2)
+            if shape and shape.startswith("("):
+                notes.append(f"types.rs {name}::{vm.group(1)}: Tupel-Variante wird nicht abgebildet")
+                continue
+            if tagged:
+                if shape is None:
+                    notes.append(f"types.rs {name}::{vm.group(1)}: Unit-Variante in getaggtem Enum (Serde ignoriert dann Zusatzfelder nicht streng)")
+                    variants[vname] = []
+                else:
+                    variants[vname] = [
+                        re.sub(r"^pub\s+", "", f.split(":")[0].strip()) for f in split_top_level(shape[1:-1], rust=True)
+                    ]
+            elif shape is not None:
+                notes.append(f"types.rs {name}::{vm.group(1)}: Struct-Variante in ungetaggtem Enum wird nicht abgebildet")
             else:
-                simple_enums[name] = [jname(v) for v, _ in variants]
-    return structs, simple_enums, tagged_enums, consts
+                simple.append(vname)
+        if tagged:
+            tagged_enums[name] = variants
+        else:
+            simple_enums[name] = simple
+    return structs, simple_enums, tagged_enums, consts, notes
 
 
 @dataclass
@@ -301,23 +399,28 @@ def parse_backend_commands(src: str) -> list[str]:
     if not m:
         raise ParseError("BACKEND_COMMANDS nicht gefunden")
     end = match_bracket(src, m.end() - 1)
-    return re.findall(r"'([a-z_]+)'", src[m.end() : end])
+    found = [m.group(2) for m in re.finditer(r"""(['"])([a-z_]+)\1""", src[m.end() : end])]
+    if not found:
+        raise ParseError("BACKEND_COMMANDS ist leer oder nicht lesbar")
+    return found
 
 
 def parse_calls(src: str) -> list[JsCall]:
     calls = []
-    for m in re.finditer(r"\b(?:commit|backend\.invoke|invoke)\(\s*'([a-z_]+)'\s*(,\s*)?", src):
+    for m in re.finditer(r"""\b(?:commit|backend\.invoke|invoke)\(\s*(['"])([a-z_]+)\1\s*(,\s*)?""", src):
         line = line_of(src, m.start())
         props: list[JsProp] = []
         keys = None
-        if m.group(2):
+        if m.group(3):
             rest = m.end()
             if src[rest] == "{":
                 props = js_object_props(src, rest)
                 keys = [p.key or "..." + p.value for p in props]
             else:
                 keys = ["?" + src[rest : rest + 20]]
-        calls.append(JsCall(m.group(1), line, keys, props))
+        calls.append(JsCall(m.group(2), line, keys, props))
+    if not calls:
+        raise ParseError("keine commit()/backend.invoke()-Aufrufe mit Befehlsnamen gefunden")
     return calls
 
 
@@ -346,13 +449,16 @@ def collect_shapes(src: str) -> list[Shape]:
     _, event_body = js_function_body(src, "editEvent")
     _, task_body = js_function_body(src, "editTask")
     _, vcf_body = js_function_body(src, "parseVcf")
-    vcf_obj = vcf_body.index("return {", vcf_body.index("map(")) + len("return ")
+    vcf_ret = re.search(r"map\(.*?return\s*\{", vcf_body, re.S)
+    if not vcf_ret:
+        raise ParseError("parseVcf: Rückgabeobjekt nicht gefunden")
+    vcf_obj = vcf_ret.end() - 1
     vcf_keys = [p.key for p in js_object_props(vcf_body, vcf_obj) if p.key]
     _, extras_body = js_function_body(src, "ensureExtras")
 
     def call_literal_keys(body: str, helper: str) -> dict[str, str]:
         keys: dict[str, str] = {}
-        for cm in re.finditer(rf"\b{helper}\(\{{", body):
+        for cm in re.finditer(rf"\b{helper}\(\s*\{{", body):
             for p in js_object_props(body, cm.end() - 1):
                 if p.key:
                     keys.setdefault(p.key, p.value)
@@ -369,6 +475,9 @@ def collect_shapes(src: str) -> list[Shape]:
         "o@ensureExtras/ev": call_literal_keys(extras_body, "ev"),
         "o@ensureExtras/task": call_literal_keys(extras_body, "task"),
     }
+    for rkey, keys in resolvers.items():
+        if not keys:
+            raise ParseError(f"Spread-Auflösung {rkey}: keine Felder gefunden")
     func_starts = sorted(
         (m.start(), m.group(1)) for m in re.finditer(r"(?:async\s+)?function\s+(\w+)\s*\(", src)
     )
@@ -382,13 +491,13 @@ def collect_shapes(src: str) -> list[Shape]:
         return name
 
     shapes = []
-    for m in re.finditer(r"\{\s*id:\s*uid\('(\w+)'\)", src):
-        entity = ENTITY_BY_PREFIX.get(m.group(1))
+    for m in re.finditer(r"""\{\s*id\s*:\s*uid\(\s*(['"])(\w+)\1\s*\)""", src):
+        entity = ENTITY_BY_PREFIX.get(m.group(2))
         if not entity:
             continue
         brace = m.start()
         func = enclosing(brace)
-        helper = re.search(r"const (\w+) = o => \($", src[max(0, brace - 40) : brace])
+        helper = re.search(r"const (\w+)\s*=\s*\(?o\)?\s*=>\s*\(\s*$", src[max(0, brace - 40) : brace])
         origin = f"fluent-mail.html:{line_of(src, brace)} ({func}{'/' + helper.group(1) if helper else ''})"
         shape = Shape(entity, origin, {}, func=func)
         for p in js_object_props(src, brace):
@@ -402,6 +511,9 @@ def collect_shapes(src: str) -> list[Shape]:
             else:
                 shape.unresolved.append(p.value)
         shapes.append(shape)
+    missing = sorted(set(ENTITY_BY_PREFIX.values()) - {sh.entity for sh in shapes})
+    if missing:
+        raise ParseError(f"keine erzeugten Objekte gefunden für: {missing}")
     return shapes
 
 
@@ -421,7 +533,10 @@ def option_values(src: str, const: str) -> list[str]:
     if not m:
         raise ParseError(f"{const} nicht gefunden")
     end = match_bracket(src, m.end() - 1)
-    return re.findall(r"\[\s*'([^']*)'\s*,", src[m.end() : end])
+    found = [m.group(2) for m in re.finditer(r"""\[\s*(['"])([^'"]*)\1\s*,""", src[m.end() : end])]
+    if not found:
+        raise ParseError(f"{const}: keine Optionen gefunden")
+    return found
 
 
 # --------------------------------------------------------------------------- Werteprüfung
@@ -659,7 +774,7 @@ def check_options(rep: Report, src: str, val: Validator) -> None:
         rep.errors.append(f"FILTER_ACTIONS {js_actions} ≠ Rust Action {sorted(val.tagged['Action'])}")
     else:
         rep.ok.append(f"FILTER_ACTIONS = Action {sorted(val.tagged['Action'])}")
-    match_opts = re.search(r"selectEl\(\[\['any'[^\]]*\],\s*\['all'", src)
+    match_opts = re.search(r"""selectEl\(\s*\[\s*\[\s*(['"])any\1[^\]]*\]\s*,\s*\[\s*(['"])all\2""", src)
     if not match_opts or sorted(val.enums["MatchMode"]) != ["all", "any"]:
         rep.errors.append("Filter-Verknüpfung any/all ≠ Rust MatchMode")
     else:
@@ -675,7 +790,7 @@ def check_options(rep: Report, src: str, val: Validator) -> None:
     if not m:
         rep.warnings.append("uid()-Definition hat sich geändert – Id-Format manuell prüfen")
     else:
-        bad = sorted({p for p in re.findall(r"uid\('([^']*)'\)", src) if not re.fullmatch(r"[A-Za-z0-9_-]{0,40}", p)})
+        bad = sorted({p for p in (m.group(2) for m in re.finditer(r"""uid\(\s*(['"])([^'"]*)\1\s*\)""", src)) if not re.fullmatch(r"[A-Za-z0-9_-]{0,40}", p)})
         if bad:
             rep.errors.append(f"uid()-Präfixe ergeben ungültige Ids: {bad}")
         else:
@@ -699,14 +814,23 @@ def check_fixtures(rep: Report, val: Validator, cmds: dict[str, RustCommand]) ->
         if sorted(args) != expected:
             rep.errors.append(f"{label}: Argumente {sorted(args)} ≠ {expected}")
             continue
+        expect = data.get("expect")
+        if expect not in ("accept", "reject"):
+            rep.errors.append(f"{label}: Feld \"expect\" fehlt oder ist nicht \"accept\"/\"reject\"")
+            continue
         errs = []
         for p in rc.params:
             errs += val.value(rc.param_types[p], args[snake_to_camel(p)], snake_to_camel(p))
-        sev = data.get("severity", "hoch")
-        if errs:
-            rep.errors.append(f"{label}: Rust lehnt ab [{sev}] – " + "; ".join(errs))
-        else:
+        sev = data.get("severity", "-")
+        if expect == "accept" and errs:
+            rep.errors.append(f"{label}: soll angenommen werden, Rust lehnt ab [{sev}] – " + "; ".join(errs))
+        elif expect == "accept":
             rep.ok.append(f"{label}: von Rust akzeptiert")
+        elif errs:
+            # Der Prototyp erzeugt eine ungültige Nutzlast; Rusts Ablehnung ist gewollt.
+            rep.proto_bugs.append(f"{label}: Rust lehnt erwartungsgemäß ab [{sev}] – " + "; ".join(errs))
+        else:
+            rep.errors.append(f"{label}: soll abgelehnt werden, Rust würde annehmen")
 
 
 def check_config(rep: Report, html: str) -> None:
@@ -738,7 +862,7 @@ def main() -> int:
         html = HTML.read_text(encoding="utf-8")
         main_rs = MAIN_RS.read_text(encoding="utf-8")
         types_rs = TYPES_RS.read_text(encoding="utf-8")
-        structs, enums, tagged, consts = parse_types(types_rs)
+        structs, enums, tagged, consts, type_notes = parse_types(types_rs)
         val = Validator(structs, enums, tagged, consts)
         proto = parse_backend_commands(html)
         cmds, handler = parse_commands(main_rs)
@@ -756,6 +880,7 @@ def main() -> int:
     rep = Report()
     print(f"Vertragstest: {len(proto)} Befehle im Prototyp, {len(cmds)} Tauri-Commands, "
           f"{len(calls)} Aufrufe, {len(shapes)} erzeugte Objekte")
+    rep.warnings.extend(type_notes)
     check_commands(rep, proto, cmds, handler)
     check_calls(rep, calls, proto, cmds)
     check_shapes(rep, shapes, val, html)
