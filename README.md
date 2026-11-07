@@ -66,13 +66,28 @@ cargo clippy --all-targets -- -D warnings
 cargo fmt --check
 ```
 
+Sicherheitsprüfungen (laufen auch in der CI, `.github/workflows/ci.yml`; lokal einmalig
+`cargo install cargo-deny cargo-audit --locked`):
+
+```bash
+cargo deny check
+cargo audit --deny warnings
+```
+
 ## Sicherheit
 
 - Lints im Workspace: `unsafe_code = "forbid"`, `unwrap_used`/`panic` verboten, Release mit `overflow-checks`.
 - Tauri: strikte CSP, keine Plugin-Rechte (`capabilities/default.json` leer), kein globales Tauri-Objekt.
   Die CSP enthält `'wasm-unsafe-eval'`, weil die Leptos-Oberfläche als WebAssembly läuft.
+- Plugin-Rechte: Abfragen nur über ein geprüftes `ValidatedManifest`. Netzwerkrechte nur für öffentliche
+  DNS-Namen (keine IP-Adressen in irgendeiner Schreibweise, keine lokalen oder internen Endungen wie
+  `localhost`, `.local`, `.internal`, `.arpa`). Beim späteren Verbindungsaufbau muss zusätzlich die
+  **aufgelöste** IP gegen private, Loopback- und Link-Local-Bereiche geprüft werden (DNS-Rebinding).
+- Eingehendes JSON: unbekannte Felder werden überall abgelehnt, auch in getaggten Enums (`Action`, `Capability`).
+- CI: `cargo fmt`, `clippy`, Tests, `cargo audit` (RustSec) und `cargo deny` (Lizenzen, Quellen, Bans);
+  minimale Workflow-Rechte (`contents: read`).
 - Noch einzubauen: Tokens und Passwörter im Betriebssystem-Schlüsselbund (`keyring`), `secrecy::SecretString`,
-  `cargo audit` und `cargo deny` in der CI, Rate-Limits und Body-Limits sobald ein Server existiert.
+  Rate-Limits und Body-Limits sobald ein Server existiert.
 
 ## Nächste Schritte
 

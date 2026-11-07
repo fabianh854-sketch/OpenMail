@@ -1,0 +1,67 @@
+# CI für den Rust-Kern: Format, Lints, Tests sowie Sicherheitsprüfungen
+# (RustSec-Meldungen via cargo-audit, Lizenzen/Quellen/Bans via cargo-deny).
+# Gebaut wird nur das Workspace-Mitglied `crates/openmail-core`;
+# `src-tauri` und `ui` sind per `exclude` ausgeschlossen.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Minimale Rechte für alle Jobs.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: Format, Clippy, Tests
+    runs-on: ubuntu-latest
+    # Nur hier: beim Installieren von cargo-audit würden neue Compiler-Warnungen sonst die CI brechen.
+    env:
+      RUSTFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Formatierung prüfen
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Tests
+        run: cargo test -p openmail-core --locked
+
+  audit:
+    name: cargo audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      # Bewusst ohne rustsec/audit-check: der bräuchte `checks: write`/`issues: write`.
+      - name: cargo-audit installieren
+        run: cargo install cargo-audit --locked
+      - name: RustSec-Meldungen prüfen
+        run: cargo audit --deny warnings
+
+  deny:
+    name: cargo deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check

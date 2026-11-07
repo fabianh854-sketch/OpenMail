@@ -1,0 +1,44 @@
+# Konfiguration für cargo-deny (https://embarkstudios.github.io/cargo-deny/).
+# Prüft Sicherheitsmeldungen, Lizenzen, doppelte/verbotene Crates und Herkunft
+# der Abhängigkeiten. Lokal: `cargo deny check`.
+
+[graph]
+# Alle Features prüfen, damit auch optionale Abhängigkeiten erfasst werden.
+all-features = true
+
+[advisories]
+version = 2
+# RustSec-Datenbank; jede Meldung (Lücke, nicht gepflegt, zurückgezogen) bricht ab.
+db-urls = ["https://github.com/rustsec/advisory-db"]
+yanked = "deny"
+# Ausnahmen nur mit Begründung und Ticket eintragen, z. B.:
+# ignore = [{ id = "RUSTSEC-0000-0000", reason = "…" }]
+ignore = []
+
+[licenses]
+version = 2
+# Nur Lizenzen, die mit der Projektlizenz Apache-2.0 verträglich sind und in
+# Cargo.lock tatsächlich vorkommen. Neue Lizenzen bewusst ergänzen.
+allow = [
+    "Apache-2.0",
+    "MIT",
+    "Unicode-3.0", # unicode-ident (Unicode-Datentabellen)
+]
+confidence-threshold = 0.93
+
+[licenses.private]
+# Eigene, nicht veröffentlichte Crates (`publish = false`) nicht prüfen.
+ignore = true
+
+[bans]
+multiple-versions = "warn"
+wildcards = "deny"
+# Pfad-Abhängigkeiten innerhalb des Workspaces sind erlaubt.
+allow-wildcard-paths = true
+highlight = "all"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []
