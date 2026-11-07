@@ -127,6 +127,15 @@ impl From<Text> for String {
     }
 }
 
+/// Domain-Label einer Adresse: 1 bis 63 Byte, Buchstaben (auch internationale), Ziffern und `-`,
+/// nicht am Anfang oder Ende.
+fn valid_domain_label(label: &str) -> bool {
+    (1..=63).contains(&label.len())
+        && !label.starts_with('-')
+        && !label.ends_with('-')
+        && label.chars().all(|c| c.is_alphanumeric() || c == '-')
+}
+
 /// E-Mail-Adresse (pragmatische Prüfung, keine vollständige RFC-5322-Grammatik).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
@@ -151,10 +160,13 @@ impl TryFrom<String> for Email {
         let (local, domain) = v.split_once('@').ok_or(ERR)?;
         let ok = !local.is_empty()
             && local.len() <= 64
-            && !domain.contains('@')
             && domain.contains('.')
-            && !domain.starts_with('.')
-            && !domain.ends_with('.');
+            && domain.split('.').all(valid_domain_label)
+            // Endung braucht einen Buchstaben: schließt IP-Literale wie `a@1.2.3.4` aus.
+            && domain
+                .rsplit('.')
+                .next()
+                .is_some_and(|tld| tld.chars().any(char::is_alphabetic));
         if ok {
             Ok(Self(v.to_owned()))
         } else {
@@ -305,13 +317,15 @@ pub struct Rule {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "lowercase", deny_unknown_fields)]
 pub enum Action {
     Move { value: Id },
     Label { value: Id },
-    Star,
-    Read,
-    Delete,
+    // Leere Struct-Varianten statt Unit-Varianten: Nur so lehnt Serde bei intern getaggten
+    // Enums zusätzliche Felder ab (`{"type":"star","value":…}`).
+    Star {},
+    Read {},
+    Delete {},
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

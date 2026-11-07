@@ -1,6 +1,6 @@
 use crate::api::{filter_matches, Api, MailView};
 use crate::error::AppError;
-use crate::ext::{Capability, ChatProtocol, ExtensionManifest, Providers};
+use crate::ext::{Capability, ChatProtocol, ExtensionManifest, Providers, ValidatedManifest};
 use crate::store::Collection;
 use crate::types::{
     Action, CalEvent, Contact, Email, Id, MailFilter, MatchMode, Name, Prio, Repeat, Rule,
@@ -45,7 +45,7 @@ fn filter(mode: MatchMode, rules: Vec<Rule>) -> Result<MailFilter, AppError> {
         on: true,
         match_mode: mode,
         rules,
-        actions: vec![Action::Star],
+        actions: vec![Action::Star {}],
     })
 }
 
@@ -68,14 +68,17 @@ fn id_accepts_safe_characters_only() {
 
 #[test]
 fn email_validation_rejects_malformed_addresses() {
-    for ok in ["a@b.de", "lena.hoffmann@contoso.com"] {
+    for ok in ["a@b.de", "lena.hoffmann@contoso.com", "x@mail-1.müller.de"] {
         assert!(Email::try_from(ok.to_owned()).is_ok(), "{ok}");
     }
     for bad in [
-        "", "a@", "@b.de", "a@b", "a@@b.de", "a b@c.de", "a@.de", "a@b.", "a\n@b.de",
+        "", "a@", "@b.de", "a@b", "a@@b.de", "a b@c.de", "a@.de", "a@b.", "a\n@b.de", "a@b..de",
+        "a@-b.de", "a@b-.de", "a@b_c.de",
     ] {
         assert!(Email::try_from(bad.to_owned()).is_err(), "{bad:?}");
     }
+    let long_label = format!("a@{}.de", "b".repeat(64));
+    assert!(Email::try_from(long_label).is_err());
 }
 
 #[test]
@@ -216,10 +219,17 @@ fn filter_action_json_matches_the_ui_shape() -> TestResult {
             Action::Move {
                 value: id("archive")?
             },
-            Action::Star
+            Action::Star {}
         ]
     );
-    assert!(serde_json::from_str::<Vec<Action>>(r#"[{"type":"move","value":"../x"}]"#).is_err());
+    for bad in [
+        r#"[{"type":"move","value":"../x"}]"#,
+        r#"[{"type":"move","value":"archive","extra":1}]"#,
+        r#"[{"type":"star","value":"archive"}]"#,
+        r#"[{"type":"forward","value":"x"}]"#,
+    ] {
+        assert!(serde_json::from_str::<Vec<Action>>(bad).is_err(), "{bad}");
+    }
     Ok(())
 }
 
@@ -246,34 +256,147 @@ fn registry_rejects_duplicates_and_bad_keys() -> TestResult {
     Ok(())
 }
 
-#[test]
-fn manifest_denies_by_default_and_rejects_wildcards() -> TestResult {
-    let manifest = ExtensionManifest {
+fn manifest(capabilities: Vec<Capability>) -> Result<ExtensionManifest, AppError> {
+    Ok(ExtensionManifest {
         id: id("zusammenfassung")?,
         name: name("Thread-Zusammenfassung")?,
         version: name("0.4")?,
-        capabilities: vec![
-            Capability::ReadMail,
-            Capability::Network {
-                hosts: vec!["api.example.org".to_owned()],
-            },
-        ],
-    };
-    manifest.validate()?;
-    assert!(manifest.allows(&Capability::ReadMail));
-    assert!(!manifest.allows(&Capability::SendMail));
-    assert!(manifest.allows(&Capability::Network {
-        hosts: vec!["api.example.org".to_owned()]
-    }));
-    assert!(!manifest.allows(&Capability::Network {
-        hosts: vec!["evil.example.org".to_owned()]
-    }));
+        capabilities,
+    })
+}
 
-    let mut wild = manifest;
-    wild.capabilities = vec![Capability::Network {
-        hosts: vec!["*".to_owned()],
-    }];
-    assert!(wild.validate().is_err());
+fn network(hosts: &[&str]) -> Capability {
+    Capability::Network {
+        hosts: hosts.iter().map(|h| (*h).to_owned()).collect(),
+    }
+}
+
+#[test]
+fn manifest_denies_by_default_and_rejects_wildcards() -> TestResult {
+    let checked = ValidatedManifest::try_from(manifest(vec![
+        Capability::ReadMail {},
+        network(&["api.example.org"]),
+    ])?)?;
+    assert!(checked.allows(&Capability::ReadMail {}));
+    assert!(!checked.allows(&Capability::SendMail {}));
+    assert!(checked.allows(&network(&["api.example.org"])));
+    assert!(checked.allows(&network(&["API.Example.org"])));
+    assert!(!checked.allows(&network(&["evil.example.org"])));
+    assert!(!checked.allows(&network(&["api.example.org", "evil.example.org"])));
+    // Eine Netzwerkanfrage ohne Host darf nie als erlaubt gelten.
+    assert!(!checked.allows(&network(&[])));
+
+    assert!(ValidatedManifest::try_from(manifest(vec![network(&["*"])])?).is_err());
+    Ok(())
+}
+
+#[test]
+fn manifest_rejects_local_and_ip_hosts() -> TestResult {
+    for bad in [
+        "localhost",
+        "intranet",
+        "printer.local",
+        "db.internal",
+        "nas.home.arpa",
+        "1.0.0.127.in-addr.arpa",
+        "router.lan",
+        "box.localdomain",
+        "app.test",
+        "x.invalid",
+        "nas.home",
+        "git.corp",
+        "1.0.0.0.ip6.arpa",
+        "127.1",
+        "0x7f.1",
+        "0x7f.0x1",
+        "0x7f.0x0.0x0.0x1",
+        "0xa.0xa",
+        "017.0x1",
+        "example.123",
+        "example.x",
+        "127.0.0.1",
+        "192.168.0.1",
+        "10.0.0.1",
+        "::1",
+        "[::1]",
+        "Example.org",
+        "a..b.org",
+        ".example.org",
+        "example.org.",
+        "-a.example.org",
+        "a-.example.org",
+        "exa_mple.org",
+        "*.example.org",
+        "",
+    ] {
+        let result = ValidatedManifest::try_from(manifest(vec![network(&[bad])])?);
+        assert!(result.is_err(), "{bad:?}");
+    }
+    let long_label = format!("{}.org", "a".repeat(64));
+    assert!(ValidatedManifest::try_from(manifest(vec![network(&[&long_label])])?).is_err());
+    for ok in [
+        "api.example.org",
+        "mail-1.example.co.uk",
+        "xn--mnchen-3ya.de",
+    ] {
+        assert!(
+            ValidatedManifest::try_from(manifest(vec![network(&[ok])])?).is_ok(),
+            "{ok}"
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn manifest_rejects_duplicates_and_too_many_entries() -> TestResult {
+    let dup_cap = manifest(vec![Capability::ReadMail {}, Capability::ReadMail {}])?;
+    assert!(ValidatedManifest::try_from(dup_cap).is_err());
+    let dup_host = manifest(vec![network(&["a.example.org", "a.example.org"])])?;
+    assert!(ValidatedManifest::try_from(dup_host).is_err());
+    let hosts: Vec<String> = (0..17).map(|i| format!("h{i}.example.org")).collect();
+    let refs: Vec<&str> = hosts.iter().map(String::as_str).collect();
+    assert!(ValidatedManifest::try_from(manifest(vec![network(&refs)])?).is_err());
+    Ok(())
+}
+
+#[test]
+fn oversized_host_list_is_rejected_before_duplicate_scan() -> TestResult {
+    let hosts = vec!["a.example.org".to_owned(); 100_000];
+    let big = manifest(vec![Capability::Network { hosts }])?;
+    assert!(ValidatedManifest::try_from(big).is_err());
+    Ok(())
+}
+
+#[test]
+fn tagged_enums_serialize_without_extra_fields() -> TestResult {
+    assert_eq!(
+        serde_json::to_string(&Action::Star {})?,
+        r#"{"type":"star"}"#
+    );
+    assert_eq!(
+        serde_json::to_string(&Capability::ReadMail {})?,
+        r#"{"kind":"read_mail"}"#
+    );
+    Ok(())
+}
+
+#[test]
+fn manifest_json_is_validated_on_parse() -> TestResult {
+    let ok = r#"{"id":"x","name":"X","version":"1","capabilities":[{"kind":"read_mail"},{"kind":"network","hosts":["api.example.org"]}]}"#;
+    let checked: ValidatedManifest = serde_json::from_str(ok)?;
+    assert!(checked.allows(&Capability::ReadMail {}));
+    for bad in [
+        r#"{"id":"x","name":"X","version":"1","capabilities":[{"kind":"network","hosts":["localhost"]}]}"#,
+        r#"{"id":"x","name":"X","version":"1","capabilities":[{"kind":"network","hosts":["a.example.org"],"extra":1}]}"#,
+        r#"{"id":"x","name":"X","version":"1","capabilities":[{"kind":"read_mail","hosts":["a.example.org"]}]}"#,
+        r#"{"id":"x","name":"X","version":"1","capabilities":[{"kind":"root"}]}"#,
+        r#"{"id":"x","name":"X","version":"1","capabilities":[],"extra":true}"#,
+    ] {
+        assert!(
+            serde_json::from_str::<ValidatedManifest>(bad).is_err(),
+            "{bad}"
+        );
+    }
     Ok(())
 }
 
