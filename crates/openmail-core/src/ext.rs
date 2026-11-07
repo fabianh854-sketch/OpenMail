@@ -99,7 +99,7 @@ const MAX_LABEL_LEN: usize = 63;
 /// (z. B. `127.0.0.1.nip.io`, DNS-Rebinding). Wer später Verbindungen für Erweiterungen aufbaut,
 /// muss deshalb zusätzlich die **aufgelöste** IP gegen Loopback-, private, Link-Local- und
 /// reservierte Bereiche prüfen.
-const BLOCKED_SUFFIXES: [&str; 13] = [
+const BLOCKED_SUFFIXES: [&str; 11] = [
     "localhost",
     "localdomain",
     "local",
@@ -110,9 +110,8 @@ const BLOCKED_SUFFIXES: [&str; 13] = [
     "corp",
     "test",
     "invalid",
-    "home.arpa",
-    "in-addr.arpa",
-    "ip6.arpa",
+    // Infrastruktur-Zone (Reverse-DNS, `home.arpa`, `ipv4only.arpa` …), für Erweiterungen nie nötig.
+    "arpa",
 ];
 
 /// Recht, das eine Erweiterung anfordern kann. Alles, was nicht aufgeführt ist, ist verboten.

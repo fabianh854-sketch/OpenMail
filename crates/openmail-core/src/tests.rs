@@ -306,6 +306,7 @@ fn manifest_rejects_local_and_ip_hosts() -> TestResult {
         "nas.home",
         "git.corp",
         "1.0.0.0.ip6.arpa",
+        "ipv4only.arpa",
         "127.1",
         "0x7f.1",
         "0x7f.0x1",
