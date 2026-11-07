@@ -1,0 +1,17 @@
+{
+  "source": "fluent-mail.html:3942 editPerson (neuer Kontakt)",
+  "command": "save_contact",
+  "args": {
+    "contact": {
+      "id": "pmhp3k1x24",
+      "fav": false,
+      "name": "Lena Hoffmann",
+      "email": "lena.hoffmann@contoso.com",
+      "phone": "+49 30 5550 1000",
+      "org": "Contoso",
+      "title": "Projektleitung",
+      "book": "personal",
+      "note": ""
+    }
+  }
+}

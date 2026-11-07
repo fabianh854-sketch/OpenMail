@@ -1,0 +1,18 @@
+{
+  "source": "fluent-mail.html:3942 editPerson, E-Mail-Feld leer gelassen (optional im Formular)",
+  "severity": "hoch",
+  "command": "save_contact",
+  "args": {
+    "contact": {
+      "id": "pmhp3k1x25",
+      "fav": false,
+      "name": "Oma Huber",
+      "email": "",
+      "phone": "+49 8031 1234",
+      "org": "",
+      "title": "",
+      "book": "personal",
+      "note": ""
+    }
+  }
+}

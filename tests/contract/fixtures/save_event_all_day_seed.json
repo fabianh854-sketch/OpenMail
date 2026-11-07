@@ -1,0 +1,19 @@
+{
+  "source": "fluent-mail.html:3669 ensureExtras/ev (Feiertag)",
+  "command": "save_event",
+  "args": {
+    "event": {
+      "id": "emhp3k1x0b",
+      "cal": "c3",
+      "place": "",
+      "allDay": true,
+      "repeat": "yearly",
+      "remind": -1,
+      "attendees": "",
+      "desc": "",
+      "title": "1. Weihnachtstag",
+      "start": 1798153200000,
+      "end": 1798153200000
+    }
+  }
+}

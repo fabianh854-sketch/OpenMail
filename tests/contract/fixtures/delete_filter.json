@@ -1,0 +1,7 @@
+{
+  "source": "fluent-mail.html:4779 Filter löschen",
+  "command": "delete_filter",
+  "args": {
+    "id": "flmhp3k1x2a"
+  }
+}

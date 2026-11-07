@@ -1,0 +1,25 @@
+{
+  "source": "fluent-mail.html:4739 editFilter: Aktion 'label' bei leerer Kategorienliste setzt value = undefined (fällt in JSON weg)",
+  "severity": "niedrig",
+  "command": "save_filter",
+  "args": {
+    "filter": {
+      "id": "flmhp3k1x2b",
+      "name": "Rechnungen",
+      "on": true,
+      "match": "any",
+      "rules": [
+        {
+          "field": "subject",
+          "op": "contains",
+          "value": "Rechnung"
+        }
+      ],
+      "actions": [
+        {
+          "type": "label"
+        }
+      ]
+    }
+  }
+}

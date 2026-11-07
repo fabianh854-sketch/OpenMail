@@ -1,0 +1,7 @@
+{
+  "source": "fluent-mail.html:4425 editTask (Löschen)",
+  "command": "delete_task",
+  "args": {
+    "id": "tmhp3k1x29"
+  }
+}

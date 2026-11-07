@@ -1,0 +1,15 @@
+{
+  "source": "fluent-mail.html:4430 editTask (neue Aufgabe mit Fälligkeit)",
+  "command": "save_task",
+  "args": {
+    "task": {
+      "id": "tmhp3k1x29",
+      "done": false,
+      "title": "Wartungsvertrag 2027 prüfen",
+      "cal": "c1",
+      "prio": "high",
+      "due": 1794337200000,
+      "note": "Bis Freitag"
+    }
+  }
+}

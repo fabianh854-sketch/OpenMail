@@ -1,0 +1,28 @@
+{
+  "source": "fluent-mail.html:3730 ensureExtras (Startfilter)",
+  "command": "save_filter",
+  "args": {
+    "filter": {
+      "id": "flmhp3k1x0e",
+      "name": "Newsletter archivieren",
+      "on": false,
+      "match": "any",
+      "rules": [
+        {
+          "field": "from",
+          "op": "contains",
+          "value": "newsletter@"
+        }
+      ],
+      "actions": [
+        {
+          "type": "read"
+        },
+        {
+          "type": "move",
+          "value": "archive"
+        }
+      ]
+    }
+  }
+}

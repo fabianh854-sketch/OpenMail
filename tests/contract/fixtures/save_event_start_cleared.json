@@ -1,0 +1,20 @@
+{
+  "source": "fluent-mail.html:4161 editEvent, Beginn-Feld geleert: fromInput('') liefert null, validate() lässt null<null durch",
+  "severity": "mittel",
+  "command": "save_event",
+  "args": {
+    "event": {
+      "id": "emhp3k1x27",
+      "title": "Telefonat",
+      "cal": "c1",
+      "place": "",
+      "start": null,
+      "end": null,
+      "allDay": false,
+      "repeat": "none",
+      "remind": 15,
+      "attendees": "",
+      "desc": ""
+    }
+  }
+}

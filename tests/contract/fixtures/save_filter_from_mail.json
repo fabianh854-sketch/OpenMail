@@ -1,0 +1,33 @@
+{
+  "source": "fluent-mail.html:3140 + 4729 editFilter mit preset.from",
+  "command": "save_filter",
+  "args": {
+    "filter": {
+      "id": "flmhp3k1x2a",
+      "name": "Lena",
+      "on": true,
+      "match": "all",
+      "rules": [
+        {
+          "field": "from",
+          "op": "contains",
+          "value": "lena.hoffmann@contoso.com"
+        },
+        {
+          "field": "subject",
+          "op": "starts",
+          "value": "Atlas"
+        }
+      ],
+      "actions": [
+        {
+          "type": "label",
+          "value": "l2"
+        },
+        {
+          "type": "star"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "source": "fluent-mail.html:3652 ensureExtras (Startdaten)",
+  "command": "save_contact",
+  "args": {
+    "contact": {
+      "id": "pmhp3k1x20",
+      "name": "Markus Weber",
+      "email": "markus.weber@fabrikam.com",
+      "phone": "",
+      "org": "Fabrikam",
+      "title": "",
+      "note": "",
+      "fav": false,
+      "book": "personal"
+    }
+  }
+}

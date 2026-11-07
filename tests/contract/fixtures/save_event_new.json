@@ -1,0 +1,19 @@
+{
+  "source": "fluent-mail.html:4166 editEvent (neuer Termin)",
+  "command": "save_event",
+  "args": {
+    "event": {
+      "id": "emhp3k1x26",
+      "title": "Design-Review Dashboard",
+      "cal": "c1",
+      "place": "Videokonferenz",
+      "start": 1794211200000,
+      "end": 1794216600000,
+      "allDay": false,
+      "repeat": "none",
+      "remind": 15,
+      "attendees": "sofia.rossi@adatum.com",
+      "desc": ""
+    }
+  }
+}
