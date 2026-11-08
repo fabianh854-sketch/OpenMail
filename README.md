@@ -67,7 +67,7 @@ mkdir -p ui/dist && cp fluent-mail.html ui/dist/index.html
 Danach in `src-tauri` mit `cargo build` (bzw. `cargo run`) bauen. `cargo tauri build` würde vorher
 `beforeBuildCommand` (trunk) ausführen und ohne `ui/` abbrechen; dann mit
 `cargo tauri build --debug --config '{"build":{"beforeBuildCommand":""}}'` aufrufen.
-Hinweis: `src-tauri/icons/icon.png` fehlt noch, ohne Icon bricht der Build ab.
+Die Platzhalter-Icons in `src-tauri/icons/` werden per `python3 src-tauri/icons/generate_icons.py` erzeugt (reine Standardbibliothek).
 
 Kern prüfen (läuft heute schon):
 
