@@ -58,6 +58,17 @@ cargo install trunk
 cargo install tauri-cli --version "^2"
 ```
 
+Prototyp in der Desktop-Shell starten (Übergang, bis `ui/` existiert; `ui/dist` ist in `.gitignore`):
+
+```bash
+mkdir -p ui/dist && cp fluent-mail.html ui/dist/index.html
+```
+
+Danach in `src-tauri` mit `cargo build` (bzw. `cargo run`) bauen. `cargo tauri build` würde vorher
+`beforeBuildCommand` (trunk) ausführen und ohne `ui/` abbrechen; dann mit
+`cargo tauri build --debug --config '{"build":{"beforeBuildCommand":""}}'` aufrufen.
+Hinweis: `src-tauri/icons/icon.png` fehlt noch, ohne Icon bricht der Build ab.
+
 Kern prüfen (läuft heute schon):
 
 ```bash
@@ -89,8 +100,15 @@ markiert, damit die Suites grün bleiben. Details in den READMEs der Ordner.
 ## Sicherheit
 
 - Lints im Workspace: `unsafe_code = "forbid"`, `unwrap_used`/`panic` verboten, Release mit `overflow-checks`.
-- Tauri: strikte CSP, keine Plugin-Rechte (`capabilities/default.json` leer), kein globales Tauri-Objekt.
-  Die CSP enthält `'wasm-unsafe-eval'`, weil die Leptos-Oberfläche als WebAssembly läuft.
+- Tauri: strikte CSP, keine Plugin-Rechte (`capabilities/default.json` leer).
+  Die CSP enthält `'wasm-unsafe-eval'`, weil die Leptos-Oberfläche als WebAssembly läuft. Inline-`<script>`/`<style>`-Blöcke
+  gebündelter Seiten gibt Tauri beim Build automatisch in der CSP frei; `style="…"`-Attribute bleiben verboten
+  (der Prototyp kommt ohne aus).
+- Offen: Command-Allowlist (`AppManifest` in `build.rs` + Rechte in `capabilities/`), damit nicht jedes Skript im
+  Fenster alle eigenen Commands aufrufen kann.
+- `withGlobalTauri: true` gilt nur für den Prototyp `fluent-mail.html` (er nutzt `window.__TAURI__.core.invoke`). Mit der
+  Leptos-Oberfläche, die `invoke` per Import nutzt, wird es wieder auf `false` gestellt. Risiko: jedes Skript im Fenster
+  kann Commands aufrufen; abgemildert durch die strikte CSP und leere Plugin-Rechte.
 - Plugin-Rechte: Abfragen nur über ein geprüftes `ValidatedManifest`. Netzwerkrechte nur für öffentliche
   DNS-Namen (keine IP-Adressen in irgendeiner Schreibweise, keine lokalen oder internen Endungen wie
   `localhost`, `.local`, `.internal`, `.arpa`). Beim späteren Verbindungsaufbau muss zusätzlich die

@@ -10,7 +10,7 @@
     "beforeBuildCommand": "trunk build --release --config ../ui/Trunk.toml"
   },
   "app": {
-    "withGlobalTauri": false,
+    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",

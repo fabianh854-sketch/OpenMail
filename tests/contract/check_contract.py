@@ -854,10 +854,20 @@ def check_config(rep: Report, html: str) -> None:
         rep.warnings.append(f"tauri.conf.json nicht lesbar: {exc}")
         return
     uses_global = "window.__TAURI__" in html
-    if uses_global and not conf.get("app", {}).get("withGlobalTauri", False):
+    global_on = conf.get("app", {}).get("withGlobalTauri", False)
+    leptos_ui = (ROOT / "ui" / "Cargo.toml").exists()
+    if global_on and (leptos_ui or not uses_global):
+        rep.warnings.append(
+            "src-tauri/tauri.conf.json: withGlobalTauri=true, aber "
+            + ("ui/ (Leptos) existiert" if leptos_ui else "der Prototyp nutzt window.__TAURI__ nicht mehr")
+            + " → wieder auf false stellen (Übergangslösung nur für den Prototyp)"
+        )
+    elif uses_global and global_on:
+        rep.ok.append("tauri.conf.json: withGlobalTauri=true, Prototyp erreicht window.__TAURI__ (Übergang bis zur Leptos-Oberfläche)")
+    elif uses_global:
         rep.warnings.append(
             "src-tauri/tauri.conf.json: withGlobalTauri=false, der Prototyp erkennt Tauri aber über window.__TAURI__ "
-            "→ backend.mode bleibt 'local', kein Aufruf erreicht Rust (bewusst, da UI später Leptos? sonst @tauri-apps/api bzw. withGlobalTauri)"
+            "→ backend.mode bleibt 'local', kein Aufruf erreicht Rust (withGlobalTauri=true setzen oder @tauri-apps/api nutzen)"
         )
     icons = ROOT / "src-tauri" / "icons" / "icon.png"
     if not icons.exists() and not conf.get("bundle", {}).get("icon"):

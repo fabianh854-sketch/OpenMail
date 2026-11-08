@@ -399,6 +399,8 @@ textarea.input { padding: var(--sp-2); resize: vertical; line-height: 20px; }
 select.input { padding-right: var(--sp-1); }
 ::placeholder { color: var(--fg-tertiary); opacity: 1; }
 .field-label { display: block; margin-bottom: var(--sp-1); color: var(--fg-secondary); font-size: var(--fs-caption); }
+/* Ohne Inline-Style, damit die CSP (style-src 'self') nichts blockiert. */
+.field-label-inline { margin: 0; }
 .field-error { margin: var(--sp-1) 0 0; min-height: 16px; color: var(--danger); font-size: var(--fs-caption); }
 
 /* ---- Avatar ---- */
@@ -1028,7 +1030,7 @@ kbd {
             <label class="check-line"><input id="adv-all" type="checkbox" data-adv="all"> In allen Ordnern suchen</label>
           </div>
           <div class="adv-wide adv-checks" role="group" aria-label="Suchen in">
-            <span class="field-label" style="margin:0">Suchen in:</span>
+            <span class="field-label field-label-inline">Suchen in:</span>
             <label class="check-line"><input type="checkbox" data-adv="sFrom" checked> Absender</label>
             <label class="check-line"><input type="checkbox" data-adv="sTo" checked> Empfänger</label>
             <label class="check-line"><input type="checkbox" data-adv="sSubject" checked> Betreff</label>
