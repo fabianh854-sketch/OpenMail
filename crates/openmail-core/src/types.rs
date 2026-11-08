@@ -259,6 +259,15 @@ pub struct Contact {
     pub book: Id,
 }
 
+/// Adressbuch, wie der Prototyp es führt (`{ id, name }`). Die optionale CardDAV-Adresse aus dem
+/// Dialog wird noch nicht gespeichert.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct AddressBook {
+    pub id: Id,
+    pub name: Name,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CalEvent {

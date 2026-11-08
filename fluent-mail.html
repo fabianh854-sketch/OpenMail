@@ -4355,6 +4355,7 @@ function renderCalendar() {
    Textknoten gerendert (kein innerHTML mit fremden Daten).
    ========================================================================== */
 const BACKEND_COMMANDS = [
+  'list_address_books', 'save_address_book', 'delete_address_book',
   'list_contacts', 'save_contact', 'delete_contact', 'save_mailing_list', 'delete_mailing_list',
   'list_calendars', 'save_calendar', 'delete_calendar', 'list_events', 'save_event', 'delete_event',
   'list_tasks', 'save_task', 'delete_task',
@@ -4824,8 +4825,9 @@ async function addMailAccount() {
 async function addAddressBook() {
   const result = await formDialog({ title: 'Adressbuch hinzufügen', fields: [{ key: 'name', label: 'Name', required: true, wide: true }, { key: 'url', label: 'CardDAV-Adresse (optional)', wide: true, placeholder: 'https://' }] });
   if (!result) return;
-  state.books.push({ id: uid('b'), name: result.name });
-  commit('save_contact', { book: result.name });
+  const book = { id: uid('b'), name: result.name };
+  state.books.push(book);
+  commit('save_address_book', { book });
   render();
   toast('Adressbuch hinzugefügt');
 }

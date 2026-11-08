@@ -1,0 +1,11 @@
+{
+  "source": "fluent-mail.html:4824 addAddressBook",
+  "expect": "accept",
+  "command": "save_address_book",
+  "args": {
+    "book": {
+      "id": "bmhp3k1x2b",
+      "name": "Kunden"
+    }
+  }
+}

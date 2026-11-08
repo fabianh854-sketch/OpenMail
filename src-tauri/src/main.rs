@@ -5,7 +5,7 @@
 //! und ruft die Befehlsschicht `openmail_core::Api` auf. Fehler gehen nur als generische
 //! Meldung an das Frontend.
 
-use openmail_core::types::{CalEvent, Contact, Id, MailFilter, Task};
+use openmail_core::types::{AddressBook, CalEvent, Contact, Id, MailFilter, Task};
 use openmail_core::{Api, AppError};
 use tauri::State;
 
@@ -15,6 +15,21 @@ struct AppState {
 
 fn public(error: AppError) -> String {
     error.public_message()
+}
+
+#[tauri::command]
+fn list_address_books(state: State<'_, AppState>) -> Result<Vec<AddressBook>, String> {
+    state.api.list_address_books().map_err(public)
+}
+
+#[tauri::command]
+fn save_address_book(book: AddressBook, state: State<'_, AppState>) -> Result<AddressBook, String> {
+    state.api.save_address_book(book).map_err(public)
+}
+
+#[tauri::command]
+fn delete_address_book(id: Id, state: State<'_, AppState>) -> Result<(), String> {
+    state.api.delete_address_book(&id).map_err(public)
 }
 
 #[tauri::command]
@@ -81,6 +96,9 @@ fn main() -> Result<(), tauri::Error> {
     tauri::Builder::default()
         .manage(AppState { api: Api::new() })
         .invoke_handler(tauri::generate_handler![
+            list_address_books,
+            save_address_book,
+            delete_address_book,
             list_contacts,
             save_contact,
             delete_contact,

@@ -12,8 +12,8 @@ Mail-, Kalender-, Aufgaben- und Chat-Client nach dem Vorbild von Thunderbird, mi
 | Desktop-Shell (Tauri v2) | `src-tauri` | Gerüst, **noch nicht gebaut** (`cargo-tauri` fehlt) |
 | Oberfläche (Leptos, WASM) | `ui` | **noch nicht angelegt** (`trunk` und WASM-Target fehlen) |
 
-Der Kern deckt bisher Kontakte, Termine, Aufgaben und Nachrichtenfilter ab. Noch offen im Kern:
-Mailinglisten, Kalender- und Adressbuchverwaltung, Konten, Chat, Einstellungen, Suche, Import/Export
+Der Kern deckt bisher Kontakte, Adressbücher, Termine, Aufgaben und Nachrichtenfilter ab. Noch offen im Kern:
+Mailinglisten, Kalenderverwaltung, Konten, Chat, Einstellungen, Suche, Import/Export
 und die echten Protokolle (IMAP, SMTP, CalDAV, CardDAV, Matrix).
 
 ## Architektur
@@ -105,6 +105,6 @@ markiert, damit die Suites grün bleiben. Details in den READMEs der Ordner.
 
 1. Toolchain einrichten (oben), dann `ui/` mit Leptos anlegen und den Prototyp Bereich für Bereich nachbauen
    (Seitenleiste, Liste, Lesebereich; Kiesel-Tokens als CSS übernehmen).
-2. Kern erweitern: Mailinglisten, Kalender, Adressbücher, Konten, Chat, Suche, Einstellungen.
+2. Kern erweitern: Mailinglisten, Kalender, Konten, Chat, Suche, Einstellungen.
 3. SQLite-Speicher (`rusqlite`, gebundene Parameter) hinter `store.rs`.
 4. Erste echte Provider: IMAP/SMTP, danach CalDAV/CardDAV und Matrix.

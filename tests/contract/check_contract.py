@@ -7,7 +7,7 @@ Prüft:
   a) BACKEND_COMMANDS im Prototyp ↔ #[tauri::command]-Funktionen ↔ generate_handler![…]
   b) Argumentnamen der Aufrufe commit('befehl', {…}) / backend.invoke('befehl', {…})
      ↔ Parameternamen der Rust-Commands (Tauri v2: JS camelCase → Rust snake_case)
-  c) Feldnamen der Objekte, die der Prototyp für Kontakt/Termin/Aufgabe/Filter erzeugt,
+  c) Feldnamen der Objekte, die der Prototyp für Adressbuch/Kontakt/Termin/Aufgabe/Filter erzeugt,
      ↔ Felder der Rust-Structs in types.rs (deny_unknown_fields, Pflichtfelder, Enum-Werte, Id-Format)
   d) Beispiel-Nutzlasten in fixtures/*.json ↔ Validierungsregeln aus types.rs
 
@@ -447,8 +447,8 @@ class Shape:
     func: str = ""  # umgebende JS-Funktion
 
 
-ENTITY_BY_PREFIX = {"p": "contact", "e": "event", "t": "task", "fl": "filter"}
-STRUCT_BY_ENTITY = {"contact": "Contact", "event": "CalEvent", "task": "Task", "filter": "MailFilter"}
+ENTITY_BY_PREFIX = {"b": "book", "p": "contact", "e": "event", "t": "task", "fl": "filter"}
+STRUCT_BY_ENTITY = {"book": "AddressBook", "contact": "Contact", "event": "CalEvent", "task": "Task", "filter": "MailFilter"}
 # Platzhalter in Entwürfen, die der Dialog vor dem Speichern überschreibt und prüft
 # (editFilter: `draft.name = nameInput.value.trim()`, leerer Name wird abgewiesen).
 DRAFT_PLACEHOLDERS = {("editFilter", "name")}
@@ -882,7 +882,7 @@ def main() -> int:
         cmds, handler = parse_commands(main_rs)
         calls = parse_calls(html)
         shapes = collect_shapes(html)
-        for needed in ("Contact", "CalEvent", "Task", "MailFilter", "Rule"):
+        for needed in ("AddressBook", "Contact", "CalEvent", "Task", "MailFilter", "Rule"):
             if needed not in structs:
                 raise ParseError(f"Struct {needed} nicht in types.rs gefunden")
         if not cmds or not handler:

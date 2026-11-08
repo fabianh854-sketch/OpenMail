@@ -3,9 +3,13 @@
 
 use crate::error::AppError;
 use crate::store::Collection;
-use crate::types::{CalEvent, Contact, Id, MailFilter, MatchMode, Rule, RuleField, RuleOp, Task};
+use crate::types::{
+    AddressBook, CalEvent, Contact, Id, MailFilter, MatchMode, Rule, RuleField, RuleOp, Task,
+};
+use std::sync::Mutex;
 
 const LIMIT_CONTACTS: usize = 50_000;
+const LIMIT_BOOKS: usize = 100;
 const LIMIT_EVENTS: usize = 100_000;
 const LIMIT_TASKS: usize = 50_000;
 const LIMIT_FILTERS: usize = 500;
@@ -51,6 +55,9 @@ pub fn filter_matches(filter: &MailFilter, mail: &MailView<'_>) -> bool {
 }
 
 pub struct Api {
+    books: Collection<AddressBook>,
+    /// Serialisiert Löschschutz-Prüfung und Entfernen eines Adressbuchs gegen `save_contact`.
+    book_links: Mutex<()>,
     contacts: Collection<Contact>,
     events: Collection<CalEvent>,
     tasks: Collection<Task>,
@@ -67,6 +74,8 @@ impl Api {
     #[must_use]
     pub fn new() -> Self {
         Self {
+            books: Collection::new(LIMIT_BOOKS),
+            book_links: Mutex::new(()),
             contacts: Collection::new(LIMIT_CONTACTS),
             events: Collection::new(LIMIT_EVENTS),
             tasks: Collection::new(LIMIT_TASKS),
@@ -74,11 +83,40 @@ impl Api {
         }
     }
 
+    pub fn list_address_books(&self) -> Result<Vec<AddressBook>, AppError> {
+        self.books.list()
+    }
+
+    pub fn save_address_book(&self, book: AddressBook) -> Result<AddressBook, AppError> {
+        self.books.upsert(book)
+    }
+
+    /// Löschschutz: Ein Adressbuch, auf das noch Kontakte verweisen, wird nicht gelöscht, damit keine
+    /// Kontakte verwaisen. Prüfung und Entfernen laufen unter `book_links`, parallel zu `save_contact`.
+    pub fn delete_address_book(&self, id: &Id) -> Result<(), AppError> {
+        let _guard = self
+            .book_links
+            .lock()
+            .map_err(|_| AppError::Internal("lock"))?;
+        if self.contacts.list()?.iter().any(|c| &c.book == id) {
+            return Err(AppError::InvalidInput("adressbuch nicht leer"));
+        }
+        self.books.remove(id)
+    }
+
     pub fn list_contacts(&self) -> Result<Vec<Contact>, AppError> {
         self.contacts.list()
     }
 
+    /// Speichert den Kontakt. Es wird bewusst NICHT geprüft, ob `contact.book` existiert: die Bücher des
+    /// Prototyps (Seed) sind dem Backend noch unbekannt. Das Lock `book_links` sorgt nur dafür, dass der
+    /// Löschschutz in `delete_address_book` nicht unterlaufen wird.
+    /// TODO: Existenzprüfung nachziehen, sobald Adressbücher synchronisiert werden.
     pub fn save_contact(&self, contact: Contact) -> Result<Contact, AppError> {
+        let _guard = self
+            .book_links
+            .lock()
+            .map_err(|_| AppError::Internal("lock"))?;
         self.contacts.upsert(contact)
     }
 

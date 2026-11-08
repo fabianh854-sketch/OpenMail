@@ -1,7 +1,7 @@
 //! Speicherschicht. Heute im Arbeitsspeicher; später dahinter SQLite (rusqlite/SQLx mit gebundenen Parametern).
 
 use crate::error::AppError;
-use crate::types::{CalEvent, Contact, Id, MailFilter, Task};
+use crate::types::{AddressBook, CalEvent, Contact, Id, MailFilter, Task};
 use std::collections::BTreeMap;
 use std::sync::RwLock;
 
@@ -19,7 +19,7 @@ macro_rules! entity {
         })+
     };
 }
-entity!(Contact, CalEvent, Task, MailFilter);
+entity!(AddressBook, Contact, CalEvent, Task, MailFilter);
 
 /// Thread-sichere, in der Größe begrenzte Sammlung. Ein vergiftetes Lock wird als interner Fehler gemeldet.
 pub struct Collection<T> {
