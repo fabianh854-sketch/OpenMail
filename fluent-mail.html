@@ -1357,8 +1357,6 @@ const LABEL_COLORS = [
 const mqNarrow = window.matchMedia('(max-width: 719px)');
 const mqOverlay = window.matchMedia('(max-width: 1099px)');
 
-let state = loadState();
-
 /** Flüchtiger UI-Zustand (wird nicht gespeichert). */
 const ui = {
   selectedId: null, cursorId: null, checked: new Set(), expanded: new Set(), quick: new Map(),
@@ -1368,17 +1366,137 @@ const ui = {
 const fileStore = new Map();
 let derived = { convs: [], groups: [], tokens: [], counts: { unread: {}, labels: {}, drafts: 0 } };
 
-function loadState() {
+/** Hinweis nach dem Laden (wird erst angezeigt, wenn die Oberfläche steht). */
+let loadNotice = '';
+
+/** Rohdaten des zuletzt gelesenen Speicherstands und ob sie schon gesichert wurden (für den Rückfall beim Rendern). */
+let loadedRaw = null;
+let loadedBackedUp = false;
+const BACKUP_MAX = 3;
+
+/** Beschädigte Rohdaten unter `<key>.defekt.<ms>` sichern (nie ein älteres Backup überschreiben, höchstens 3 behalten). Gibt den Schlüssel zurück (null, wenn nichts gesichert wurde). */
+function backupDefekt(raw) {
+  if (raw == null) return null;
+  const prefix = `${STORAGE_KEY}.defekt.`;
   try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    if (saved && Array.isArray(saved.mails) && Array.isArray(saved.accounts) && saved.accounts.length) {
-      return {
-        ...saved,
-        settings: { ...defaultSettings(), ...saved.settings },
-        view: { folder: 'inbox', sort: 'date', sortDir: 'desc', chip: 'all', ...saved.view },
-      };
+    const stamps = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(prefix) && /^\d+$/.test(key.slice(prefix.length))) stamps.push(Number(key.slice(prefix.length)));
     }
-  } catch { /* Beschädigte oder nicht verfügbare Daten: neu starten */ }
+    stamps.sort((x, y) => x - y);
+    const stamp = Math.max(Date.now(), (stamps.at(-1) ?? 0) + 1);
+    localStorage.setItem(prefix + stamp, raw);
+    stamps.push(stamp);
+    while (stamps.length > BACKUP_MAX) localStorage.removeItem(prefix + stamps.shift());
+    return prefix + stamp;
+  } catch { return null; /* Speicher voll oder gesperrt: Sicherung entfällt */ }
+}
+
+const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const isStr = v => typeof v === 'string';
+const isNum = v => typeof v === 'number' && Number.isFinite(v);
+const isPerson = p => isObj(p) && isStr(p.email) && p.email.includes('@');
+
+/**
+ * Prüft einen gespeicherten Zustand strukturell und bereinigt ihn.
+ * Gibt { state, dropped } zurück (dropped = Anzahl verworfener Einträge/Sammlungen)
+ * oder null, wenn der Zustand insgesamt unbrauchbar ist.
+ */
+function sanitizeState(saved) {
+  if (!isObj(saved) || !Array.isArray(saved.mails) || !Array.isArray(saved.accounts)) return null;
+  let dropped = 0;
+  // Sammlung auf gültige Einträge reduzieren; Verworfenes wird gezählt.
+  const keep = (list, ok, fix = x => x) => {
+    const out = [];
+    for (const item of list) { if (ok(item)) out.push(fix(item)); else dropped += 1; }
+    return out;
+  };
+  const accounts = keep(saved.accounts, a => isObj(a) && isStr(a.id) && isStr(a.email) && a.email.includes('@'), a => ({
+    ...a, name: isStr(a.name) ? a.name : a.email, label: isStr(a.label) ? a.label : a.email, signature: isStr(a.signature) ? a.signature : '',
+    ooo: { enabled: false, subject: '', message: '', ...(isObj(a.ooo) ? a.ooo : {}) },
+  }));
+  if (!accounts.length) return null;
+  const accountIds = new Set(accounts.map(a => a.id));
+  const labels = Array.isArray(saved.labels) ? keep(saved.labels, l => isObj(l) && isStr(l.id) && isStr(l.name), l => ({ ...l, color: isStr(l.color) ? l.color : 'var(--ink-muted)' })) : [];
+  const folders = Array.isArray(saved.folders) ? keep(saved.folders, f => isObj(f) && isStr(f.id) && isStr(f.name) && accountIds.has(f.account)) : [];
+  const labelIds = new Set(labels.map(l => l.id));
+  const mails = keep(saved.mails, m => isObj(m) && isStr(m.id) && accountIds.has(m.account) && isStr(m.folder) && isPerson(m.from)
+    && isStr(m.subject) && isStr(m.body) && isNum(m.date), m => {
+    // Stille Korrekturen zählen mit, damit der Hinweis erscheint.
+    const people = list => {
+      if (!Array.isArray(list)) return [];
+      const ok = list.filter(isPerson);
+      dropped += list.length - ok.length;
+      return ok.map(p => ({ ...p, name: isStr(p.name) ? p.name : '' }));
+    };
+    const labelList = Array.isArray(m.labels) ? m.labels.filter(id => isStr(id) && labelIds.has(id)) : [];
+    if (Array.isArray(m.labels)) dropped += m.labels.length - labelList.length;
+    const attList = Array.isArray(m.attachments) ? m.attachments.filter(a => isObj(a) && isStr(a.id) && isStr(a.name)) : [];
+    if (Array.isArray(m.attachments)) dropped += m.attachments.length - attList.length;
+    // Verwaiste Ordner: Nachricht in den Posteingang des Kontos verschieben, statt sie unsichtbar zu lassen.
+    const folderOk = SYSTEM_FOLDERS.some(f => f.id === m.folder) || folders.some(f => f.id === m.folder && f.account === m.account);
+    if (!folderOk) dropped += 1;
+    return {
+      ...m, folder: folderOk ? m.folder : 'inbox', from: { ...m.from, name: isStr(m.from.name) ? m.from.name : '' },
+      to: people(m.to), cc: people(m.cc), bcc: people(m.bcc),
+      read: m.read !== false, starred: m.starred === true,
+      labels: labelList,
+      attachments: attList.map(a => ({ ...a, size: isNum(a.size) ? a.size : 0, type: isStr(a.type) ? a.type : fileKind(a.name) })),
+    };
+  });
+  const contacts = Array.isArray(saved.contacts) ? keep(saved.contacts, c => isObj(c), c => ({ ...c, name: isStr(c.name) ? c.name : '', email: isStr(c.email) ? c.email : '' })) : [];
+  const view = isObj(saved.view) ? saved.view : {};
+  const result = {
+    ...saved, accounts, labels, folders, mails, contacts,
+    activeAccount: accountIds.has(saved.activeAccount) ? saved.activeAccount : accounts[0].id,
+    settings: { ...defaultSettings(), ...(isObj(saved.settings) ? saved.settings : {}) },
+    view: { ...view, folder: 'inbox', sort: 'date', sortDir: 'desc', chip: 'all', ...Object.fromEntries(Object.entries(view).filter(([, v]) => isStr(v))) },
+  };
+  // Optionale Sammlungen (Adressbuch, Kalender, Chat …): bei falscher Form entfernen, ensureExtras() ergänzt Startwerte.
+  const drop = key => { if (key in result) { delete result[key]; dropped += 1; } };
+  const arr = (key, ok) => {
+    if (!(key in result)) return true;
+    if (!Array.isArray(result[key])) { drop(key); return false; }
+    result[key] = keep(result[key], ok);
+    return true;
+  };
+  const hasId = x => isObj(x) && isStr(x.id);
+  if (!arr('people', p => hasId(p) && isStr(p.name) && isStr(p.email)) || !arr('books', b => hasId(b) && isStr(b.name))
+    || !arr('lists', l => hasId(l) && isStr(l.name) && Array.isArray(l.members))) { drop('people'); drop('books'); drop('lists'); }
+  if (!arr('calendars', c => hasId(c) && isStr(c.name)) || !arr('events', e => hasId(e) && isStr(e.cal) && isStr(e.title) && isNum(e.start) && isNum(e.end))
+    || !arr('tasks', t => hasId(t) && isStr(t.cal) && isStr(t.title))) { drop('calendars'); drop('events'); drop('tasks'); }
+  if ('people' in result && !('books' in result && 'lists' in result)) { drop('people'); drop('books'); drop('lists'); }
+  if ('calendars' in result && !('events' in result && 'tasks' in result)) { drop('calendars'); drop('events'); drop('tasks'); }
+  const chat = result.chat;
+  if ('chat' in result && !(isObj(chat) && Array.isArray(chat.accounts) && Array.isArray(chat.rooms) && chat.rooms.every(r => hasId(r) && Array.isArray(r.messages) && Array.isArray(r.members)))) drop('chat');
+  arr('savedSearches', s => hasId(s) && isStr(s.name) && isObj(s.adv));
+  arr('filters', f => hasId(f) && isStr(f.name) && Array.isArray(f.rules) && Array.isArray(f.actions));
+  arr('addons', a => hasId(a) && isStr(a.name) && isStr(a.kind));
+  arr('activities', a => hasId(a) && isStr(a.text));
+  return { state: result, dropped };
+}
+
+function loadState() {
+  let raw = null;
+  try { raw = localStorage.getItem(STORAGE_KEY); } catch { /* Speicher gesperrt: Startdaten */ }
+  loadedRaw = raw;
+  if (raw !== null) {
+    try {
+      const checked = sanitizeState(JSON.parse(raw));
+      if (checked) {
+        if (checked.dropped) {
+          const key = backupDefekt(raw);
+          loadedBackedUp = true;
+          loadNotice = `Gespeicherte Daten waren teilweise beschädigt (${checked.dropped} ungültige Einträge entfernt oder korrigiert).${key ? ` Eine Sicherung liegt unter „${key}“.` : ''}`;
+        }
+        return checked.state;
+      }
+    } catch { /* Kein gültiges JSON: Startdaten */ }
+    const key = backupDefekt(raw);
+    loadedBackedUp = true;
+    loadNotice = `Gespeicherte Daten waren beschädigt und wurden durch Startdaten ersetzt.${key ? ` Eine Sicherung liegt unter „${key}“.` : ''}`;
+  }
   const fresh = seedState();
   persist(fresh);
   return fresh;
@@ -1391,6 +1509,9 @@ function persist(data = state) {
 function defaultSettings() {
   return { density: 'normal', pane: 'right', notifications: false, conversations: true, sidebarCollapsed: window.innerWidth < 1100, listWidth: 380, listHeight: 340 };
 }
+
+/** Anwendungszustand; wird nach den Hilfsfunktionen oben geladen (Prüfung, Startdaten). */
+let state = loadState();
 
 const activeAccount = () => state.accounts.find(a => a.id === state.activeAccount);
 const accountById = id => state.accounts.find(a => a.id === id);
@@ -5302,10 +5423,26 @@ async function deleteSavedSearch(id) {
    16. START
    ========================================================================== */
 for (const el of document.querySelectorAll('[data-icon]')) el.prepend(icon(el.dataset.icon, el.dataset.iconClass));
-ensureExtras();
-applyTheme();
-if (!viewExists(state.view.folder)) state.view.folder = 'inbox';
-render();
+/** Erster Aufbau der Oberfläche; wirft er trotz Prüfung, einmalig auf Startdaten zurückfallen (keine Endlosschleife). */
+function startUi() {
+  ensureExtras();
+  applyTheme();
+  if (!viewExists(state.view.folder)) state.view.folder = 'inbox';
+  render();
+}
+try {
+  startUi();
+} catch (err) {
+  console.warn('Start mit gespeichertem Zustand fehlgeschlagen, verwende Startdaten:', err);
+  // Den beim Laden gelesenen Originalstand sichern (der Speicher wurde inzwischen evtl. überschrieben).
+  const backupKey = loadedBackedUp ? null : backupDefekt(loadedRaw);
+  const hint = backupKey ? ` Eine Sicherung liegt unter „${backupKey}“.` : '';
+  state = seedState();
+  persist();
+  loadNotice = `Gespeicherte Daten waren beschädigt und ließen sich nicht anzeigen; sie wurden durch Startdaten ersetzt.${hint}`;
+  startUi();
+}
+if (loadNotice) toast(loadNotice, { timeout: 12000 });
 </script>
 </body>
 </html>

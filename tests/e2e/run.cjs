@@ -663,25 +663,142 @@ test('persistenz: localStorage gesperrt (wirft) → App läuft im Arbeitsspeiche
   noErrors(issues);
 });
 
-known('persistenz: manipulierte Einträge (Nachricht ohne Felder) bringen die App nicht zum Absturz',
-  'loadState prüft nur, ob mails/accounts Arrays sind; ein Eintrag wie {} führt beim Rendern zu einer Exception und leerer Oberfläche',
-  async () => {
-    const { page, issues } = await open({ storage: JSON.stringify({ mails: [{}], accounts: [{}] }), wait: false });
-    await waitUntil(async () => issues.pageErrors.length || (await page.locator('#nav .nav-item').count()));
-    await settle(page);
-    eq(issues.pageErrors, [], 'Uncaught Exceptions');
-    assert((await page.locator('#nav .nav-item').count()) > 0, 'Navigation leer');
-  });
+/** Alle Backups `<key>.defekt.<ms>` (aufsteigend nach Zeitstempel). */
+const backups = page => page.evaluate(k => Object.keys(localStorage).filter(n => n.startsWith(`${k}.defekt.`))
+  .sort((a, b) => Number(a.split('.').pop()) - Number(b.split('.').pop())).map(name => ({ name, value: localStorage.getItem(name) })), STORAGE_KEY);
 
-known('persistenz: Zustand mit fehlenden Sammlungen (folders/labels) bringt die App nicht zum Absturz',
-  'loadState übernimmt einen Zustand ohne folders/labels/contacts; customFolders()/labelById() werfen dann',
-  async () => {
-    const minimal = { mails: [], accounts: [{ id: 'a1', name: 'A', email: 'a@example.org', label: 'A', ooo: { enabled: false } }], activeAccount: 'a1' };
-    const { page, issues } = await open({ storage: JSON.stringify(minimal), wait: false });
-    await waitUntil(async () => issues.pageErrors.length || (await page.locator('#nav .nav-item').count()));
-    await settle(page);
-    eq(issues.pageErrors, [], 'Uncaught Exceptions');
+/** Prüft: App bedienbar (Navigation + Nachrichten), Hinweis sichtbar, Backup-Schlüssel mit den Rohdaten vorhanden. */
+async function expectRecovered(page, issues, raw) {
+  await waitUntil(async () => issues.pageErrors.length || (await page.locator('#toast-host .toast').count()));
+  await settle(page);
+  eq(issues.pageErrors, [], 'Uncaught Exceptions');
+  assert((await page.locator('#nav .nav-item').count()) > 0, 'Navigation leer');
+  assert((await page.locator('.mail-item').count()) > 0, 'Keine Nachrichten');
+  assert(/beschädigt/.test(await toastText(page)), `Kein Hinweis: ${await toastText(page)}`);
+  eq((await backups(page)).map(b => b.value), [raw], 'Backup-Schlüssel');
+  await page.locator('.mail-item').first().click();
+  await page.waitForSelector('#reader [data-action="star-mail"]');
+}
+
+test('persistenz: manipulierte Einträge (Nachricht ohne Felder) → Startdaten, Hinweis, Backup', async () => {
+  const raw = JSON.stringify({ mails: [{}], accounts: [{}] });
+  const { page, issues } = await open({ storage: raw, wait: false });
+  await expectRecovered(page, issues, raw);
+});
+
+test('persistenz: Zustand mit fehlenden Sammlungen (folders/labels) bleibt bedienbar', async () => {
+  const minimal = { mails: [], accounts: [{ id: 'a1', name: 'A', email: 'a@example.org', label: 'A', ooo: { enabled: false } }], activeAccount: 'a1' };
+  const { page, issues } = await open({ storage: JSON.stringify(minimal), wait: false });
+  await waitUntil(async () => issues.pageErrors.length || (await page.locator('#nav .nav-item').count()));
+  await settle(page);
+  eq(issues.pageErrors, [], 'Uncaught Exceptions');
+  assert((await page.locator('#nav .nav-item').count()) > 0, 'Navigation leer');
+  eq(await page.evaluate(() => [Array.isArray(state.folders), Array.isArray(state.labels), Array.isArray(state.contacts)]), [true, true, true], 'Sammlungen ergänzt');
+  eq(await page.evaluate(() => state.accounts.map(a => a.id)), ['a1'], 'Gültiges Konto bleibt erhalten');
+  eq(await backups(page), [], 'Kein Backup bei gültigem Zustand');
+});
+
+test('persistenz: kaputtes JSON → Hinweis und Backup mit den Rohdaten', async () => {
+  const { page, issues } = await open({ storage: '{kaputt', wait: false });
+  await expectRecovered(page, issues, '{kaputt');
+});
+
+test('persistenz: gültiger Zustand mit einer ungültigen Nachricht → nur diese wird verworfen', async () => {
+  const { page: seedPage } = await open();
+  const good = await seedPage.evaluate(() => JSON.parse(JSON.stringify(state)));
+  const total = good.mails.length;
+  good.mails.push({ id: 'kaputt1', account: 'a1' }, 'quatsch', null);
+  good.settings.density = 'compact';
+  const raw = JSON.stringify(good);
+  const { page, issues } = await open({ storage: raw, wait: false });
+  await expectRecovered(page, issues, raw);
+  eq(await page.evaluate(() => state.mails.length), total, 'Gültige Nachrichten erhalten');
+  eq(await page.evaluate(() => state.mails.some(m => m.id === 'kaputt1')), false, 'Ungültige Nachricht verworfen');
+  eq(await page.evaluate(() => state.settings.density), 'compact', 'Einstellung erhalten');
+  assert(/3 ungültige/.test(await toastText(page)), `Hinweis ohne Anzahl: ${await toastText(page)}`);
+});
+
+test('persistenz: optionale Felder einer Nachricht werden ergänzt, Einträge ohne Pflichtfeld verworfen', async () => {
+  const me = { name: 'A', email: 'a@example.org' };
+  const base = { account: 'a1', folder: 'inbox', from: { email: 'x@example.org' }, subject: 'S', date: Date.now(), body: '<p>b</p>' };
+  const raw = JSON.stringify({
+    mails: [{ id: 'm1', ...base }, { id: 'm2', ...base, date: 'gestern' }, { id: 'm3', ...base, from: 'x' }, { id: 'm4', ...base, account: 'unbekannt' }],
+    accounts: [{ id: 'a1', ...me, label: 'A' }, { id: 'a2' }], activeAccount: 'weg',
   });
+  const { page, issues } = await open({ storage: raw, wait: false });
+  await waitUntil(async () => issues.pageErrors.length || (await page.locator('.mail-item').count()));
+  await settle(page);
+  eq(issues.pageErrors, [], 'Uncaught Exceptions');
+  eq(await page.evaluate(() => state.mails.map(m => m.id)), ['m1'], 'Verbleibende Nachrichten');
+  eq(await page.evaluate(() => { const m = state.mails[0]; return [m.to, m.labels, m.attachments, m.read, m.starred, m.from.name]; }), [[], [], [], true, false, ''], 'Ergänzte Felder');
+  eq(await page.evaluate(() => [state.accounts.map(a => a.id), state.activeAccount]), [['a1'], 'a1'], 'Konten');
+  assert(await page.locator('.mail-item').count() === 1, 'Nachricht nicht sichtbar');
+});
+
+test('persistenz: Kontakt ohne email, leerer Betreff und benutzerdefinierter Ordner bleiben erhalten', async () => {
+  const { page: seedPage } = await open();
+  const good = await seedPage.evaluate(() => JSON.parse(JSON.stringify(state)));
+  const folder = good.folders[0];
+  good.contacts.push({ name: 'Ohne Adresse' });
+  const target = good.mails.find(m => m.account === folder.account && m.folder === 'inbox');
+  target.folder = folder.id;
+  const blank = good.mails.find(m => m.id !== target.id && m.folder === 'inbox');
+  blank.subject = '';
+  const { page, issues } = await open({ storage: JSON.stringify(good), wait: false });
+  await waitUntil(async () => issues.pageErrors.length || (await page.locator('.mail-item').count()));
+  await settle(page);
+  eq(issues.pageErrors, [], 'Uncaught Exceptions');
+  eq(await page.evaluate(() => state.contacts.filter(c => c.name === 'Ohne Adresse').map(c => c.email)), [''], 'Kontakt');
+  eq(await page.evaluate(id => findMail(id).folder, target.id), folder.id, 'Mail im eigenen Ordner');
+  eq(await page.evaluate(id => findMail(id)?.subject, blank.id), '', 'Mail ohne Betreff');
+  eq(await backups(page), [], 'Kein Backup bei gültigem Zustand');
+});
+
+test('persistenz: Mail mit verwaistem Ordner landet im Posteingang, Hinweis und Backup', async () => {
+  const { page: seedPage } = await open();
+  const good = await seedPage.evaluate(() => JSON.parse(JSON.stringify(state)));
+  const mail = good.mails.find(m => m.folder === 'inbox');
+  mail.folder = 'f-gibt-es-nicht';
+  const raw = JSON.stringify(good);
+  const { page, issues } = await open({ storage: raw, wait: false });
+  await expectRecovered(page, issues, raw);
+  eq(await page.evaluate(id => findMail(id).folder, mail.id), 'inbox', 'Ordner');
+});
+
+test('persistenz: zweimal hintereinander defekte Daten → beide Backups vorhanden', async () => {
+  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  const first = await open({ storage: '{eins', wait: false, ctx: context });
+  await expectRecovered(first.page, first.issues, '{eins');
+  const second = await open({ storage: '{zwei', wait: false, ctx: context });
+  await waitUntil(async () => (await backups(second.page)).length >= 2);
+  eq((await backups(second.page)).map(b => b.value), ['{eins', '{zwei'], 'Backups');
+  await context.close();
+});
+
+test('persistenz: höchstens 3 Backups, die ältesten fallen zuerst weg', async () => {
+  const context = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  let last;
+  for (const v of ['{a', '{b', '{c', '{d']) last = await open({ storage: v, wait: false, ctx: context });
+  await waitUntil(async () => (await backups(last.page)).some(b => b.value === '{d'));
+  eq((await backups(last.page)).map(b => b.value), ['{b', '{c', '{d'], 'Backups');
+  await context.close();
+});
+
+test('persistenz: wirft das erste Rendern trotz Prüfung, fällt die App einmalig auf Startdaten zurück', async () => {
+  const { page: seedPage } = await open();
+  const raw = JSON.stringify(await seedPage.evaluate(() => state));
+  const { page, issues } = await open({
+    storage: raw, wait: false,
+    init: () => {
+      // Erste Aktualisierung der Navigation (unabhängig von der Reihenfolge anderer Aufrufe) schlägt fehl (simuliert einen Zustand, den die Prüfung nicht erkennt); danach normal.
+      let calls = 0;
+      const original = Element.prototype.replaceChildren;
+      Element.prototype.replaceChildren = function (...args) { if (this.id === 'nav' && calls++ === 0) throw new Error('Test: Rendern fehlgeschlagen'); return original.apply(this, args); };
+    },
+  });
+  await expectRecovered(page, issues, raw);
+  assert(/Startdaten ersetzt/.test(await toastText(page)), `Falscher Hinweis: ${await toastText(page)}`);
+});
 
 /* ---- Sicherheit (XSS) ---- */
 test('xss: statisch – innerHTML nur für Icons, Sanitizer-Ausgabe und eigene Elemente', async () => {

@@ -33,8 +33,8 @@ Screenshots fehlgeschlagener Tests landen in `$E2E_SHOTS` (Standard: `<tmp>/open
 - Suche: Treffer, Hervorhebung, Regex-Sonderzeichen, erweiterte Filter, gespeicherte Suche
 - Adressbuch, Kalender, Aufgaben, Chat: im Prototyp als „Coming soon“ ausgeblendet (`SOON`); die Tests blenden
   sie per `SOON.clear()` ein und prüfen sie trotzdem
-- Filter anlegen/validieren/ausführen (`runFilters`), Theme hell/dunkel/automatisch, Persistenz (Reload, kaputter
-  oder gesperrter `localStorage`)
+- Filter anlegen/validieren/ausführen (`runFilters`), Theme hell/dunkel/automatisch, Persistenz (Reload, beschädigter, teilweise ungültiger
+  oder gesperrter `localStorage`; Backup `<key>.defekt`, Hinweis, Fallback beim Rendern)
 - XSS in Betreff, Empfänger, Mail-Body, Ordner, Kategorie, Kontakt, Filter, Chat, Termin, Aufgabe, Suche
 - Barrierefreiheit (grob): zugängliche Namen, sichtbarer Fokus, Skip-Link, Escape, Fokusfalle, `inert`
 - Responsiv 375×812, Backend-Shim (`backend.invoke`, Tauri-Weiterleitung, Fehlerhinweis)
