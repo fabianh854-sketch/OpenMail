@@ -1399,6 +1399,28 @@ const isNum = v => typeof v === 'number' && Number.isFinite(v);
 const isPerson = p => isObj(p) && isStr(p.email) && p.email.includes('@');
 
 /**
+ * Bereinigt verwaiste Filterziele (Filter gehören keinem Konto: ein Ordner gilt als gültig, wenn er in irgendeinem Konto existiert):
+ * move auf unbekannten Ordner → 'archive', label auf unbekannte Kategorie → Aktion entfernt, Filter ohne Aktion → entfernt.
+ * Ändert Filter in place; Rückgabe { filters (behalten), changed, removed }.
+ */
+function normalizeFilterTargets(filters, folders, labels) {
+  const kept = [], changed = [], removed = [];
+  for (const f of filters) {
+    let dirty = false;
+    const actions = [];
+    for (const a of f.actions) {
+      if (a.type === 'move' && !['archive', 'spam', 'trash'].includes(a.value) && !folders.some(x => x.id === a.value)) { a.value = 'archive'; dirty = true; }
+      if (a.type === 'label' && !labels.some(l => l.id === a.value)) { dirty = true; continue; }
+      actions.push(a);
+    }
+    if (!dirty) { kept.push(f); continue; }
+    f.actions = actions;
+    if (actions.length) { kept.push(f); changed.push(f); } else removed.push(f);
+  }
+  return { filters: kept, changed, removed };
+}
+
+/**
  * Prüft einen gespeicherten Zustand strukturell und bereinigt ihn.
  * Gibt { state, dropped } zurück (dropped = Anzahl verworfener Einträge/Sammlungen)
  * oder null, wenn der Zustand insgesamt unbrauchbar ist.
@@ -1472,6 +1494,11 @@ function sanitizeState(saved) {
   if ('chat' in result && !(isObj(chat) && Array.isArray(chat.accounts) && Array.isArray(chat.rooms) && chat.rooms.every(r => hasId(r) && Array.isArray(r.messages) && Array.isArray(r.members)))) drop('chat');
   arr('savedSearches', s => hasId(s) && isStr(s.name) && isObj(s.adv));
   arr('filters', f => hasId(f) && isStr(f.name) && Array.isArray(f.rules) && Array.isArray(f.actions));
+  if (Array.isArray(result.filters)) {
+    const norm = normalizeFilterTargets(result.filters, folders, labels);
+    dropped += norm.changed.length + norm.removed.length;
+    result.filters = norm.filters;
+  }
   arr('addons', a => hasId(a) && isStr(a.name) && isStr(a.kind));
   arr('activities', a => hasId(a) && isStr(a.text));
   return { state: result, dropped };
@@ -3153,12 +3180,12 @@ async function deleteFolder(id) {
     confirm: 'Löschen', danger: true,
   });
   if (!ok) return;
-  for (const f of hits) {
-    for (const a of f.actions) if (a.type === 'move' && a.value === id) a.value = 'archive';
-    commit('save_filter', { filter: f });
-  }
   for (const m of state.mails) if (m.folder === id) m.folder = 'trash';
   state.folders = state.folders.filter(f => f.id !== id);
+  const norm = normalizeFilterTargets(state.filters, state.folders, state.labels);
+  state.filters = norm.filters;
+  for (const f of norm.changed) commit('save_filter', { filter: f });
+  for (const f of norm.removed) commit('delete_filter', { id: f.id });
   if (state.view.folder === id) { state.view.folder = 'inbox'; resetSelection(); }
   persist();
   render();
@@ -3195,13 +3222,12 @@ async function deleteLabel(id) {
   ].filter(Boolean).map(t => ` ${t}.`).join('');
   const ok = await askConfirm({ title: `Kategorie „${label.name}“ löschen?`, message: `Die Kategorie wird von allen Nachrichten entfernt. Die Nachrichten selbst bleiben erhalten.${filterNote}`, confirm: 'Löschen', danger: true });
   if (!ok) return;
-  for (const f of hits) {
-    f.actions = f.actions.filter(a => !(a.type === 'label' && a.value === id));
-    if (f.actions.length) commit('save_filter', { filter: f });
-    else { state.filters = state.filters.filter(x => x !== f); commit('delete_filter', { id: f.id }); }
-  }
   for (const m of state.mails) m.labels = m.labels.filter(l => l !== id);
   state.labels = state.labels.filter(l => l.id !== id);
+  const norm = normalizeFilterTargets(state.filters, state.folders, state.labels);
+  state.filters = norm.filters;
+  for (const f of norm.changed) commit('save_filter', { filter: f });
+  for (const f of norm.removed) commit('delete_filter', { id: f.id });
   if (state.view.folder === `label:${id}`) { state.view.folder = 'inbox'; resetSelection(); }
   persist();
   render();
@@ -4877,6 +4903,7 @@ const selectEl = (options, value, onChange, label) => {
 
 async function editFilter(filter, preset = {}) {
   const draft = filter ? structuredClone(filter) : { id: uid('fl'), name: '', on: true, match: 'any', rules: [{ field: 'from', op: 'contains', value: preset.from ?? '' }], actions: [{ type: 'move', value: 'archive' }] };
+  if (filter && normalizeFilterTargets([draft], state.folders, state.labels).removed.length) draft.actions = [{ type: 'move', value: 'archive' }];
   const rulesBox = h('div');
   const actionsBox = h('div');
   const error = h('p', { class: 'field-error', role: 'alert' });

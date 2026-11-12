@@ -632,6 +632,60 @@ test('filter: unbekannte Kategorie wird nicht an die Nachricht gehängt', async 
   assert(!r.includes('l-gibts-nicht'), `Unbekannte Kategorie angehängt: ${r}`);
 });
 
+test('filter: Editor mit verwaistem Zielordner zeigt Archiv und speichert archive', async () => {
+  const { page } = await open();
+  await page.evaluate(() => {
+    state.filters.push({ id: 'flWaise', name: 'Waise', on: true, match: 'any', rules: [{ field: 'subject', op: 'contains', value: 'x' }], actions: [{ type: 'move', value: 'f-gibts-nicht' }] });
+    editFilter(state.filters.find(f => f.id === 'flWaise')).then(r => { window.__r = r; });
+  });
+  await dialog(page).getByLabel('Zielordner').waitFor();
+  eq(await dialog(page).getByLabel('Zielordner').evaluate(el => el.selectedOptions[0].textContent), 'Archiv', 'Anzeige');
+  await clickDialogButton(page, 'Speichern');
+  eq(await waitUntil(() => page.evaluate(() => window.__r?.actions[0].value)), 'archive', 'Gespeichertes Ziel');
+});
+
+test('filter: Laden normalisiert verwaiste Ziele (Hinweis, Backup, Zusammenfassung ohne leeren Namen)', async () => {
+  const { page: seedPage } = await open();
+  const good = await seedPage.evaluate(() => JSON.parse(JSON.stringify(state)));
+  const rule = [{ field: 'subject', op: 'contains', value: 'x' }];
+  good.filters = [
+    { id: 'flM', name: 'Move', on: true, match: 'any', rules: rule, actions: [{ type: 'move', value: 'f-gibts-nicht' }] },
+    { id: 'flL', name: 'Label', on: true, match: 'any', rules: rule, actions: [{ type: 'label', value: 'l-gibts-nicht' }, { type: 'star' }] },
+    { id: 'flN', name: 'Nur Label', on: true, match: 'any', rules: rule, actions: [{ type: 'label', value: 'l-gibts-nicht' }] },
+  ];
+  const raw = JSON.stringify(good);
+  const { page, issues } = await open({ storage: raw, wait: false });
+  await expectRecovered(page, issues, raw);
+  const r = await page.evaluate(() => ({ ids: state.filters.map(f => f.id), move: state.filters.find(f => f.id === 'flM').actions, label: state.filters.find(f => f.id === 'flL').actions, sum: state.filters.map(filterSummary).join(' | ') }));
+  eq(r.ids, ['flM', 'flL'], 'Filter ohne gültige Aktion entfernt');
+  eq(r.move, [{ type: 'move', value: 'archive' }], 'move → archive');
+  eq(r.label, [{ type: 'star' }], 'label entfernt');
+  assert(!/Kategorie\s*(→|\||$)/.test(r.sum) && !r.sum.includes('f-gibts-nicht'), `Zusammenfassung: ${r.sum}`);
+});
+
+test('filter: move-Ziel in Ordner eines anderen Kontos lässt die Nachricht im Posteingang', async () => {
+  const { page } = await open();
+  const folder = await page.evaluate(() => {
+    const m = state.mails.find(x => x.account === state.activeAccount && x.folder === 'inbox');
+    const other = state.accounts.find(a => a.id !== state.activeAccount);
+    state.folders.push({ id: 'fFremd', name: 'Fremd', account: other.id });
+    state.filters.push({ id: 'flFremd', name: 'Fremd', on: true, match: 'any', rules: [{ field: 'subject', op: 'contains', value: m.subject }], actions: [{ type: 'move', value: 'fFremd' }] });
+    runFilters();
+    return findMail(m.id).folder;
+  });
+  eq(folder, 'inbox', 'Nachricht verschoben');
+});
+
+test('filter: Filter mit nur ungültigen Aktionen zählt nicht als angewendet', async () => {
+  const { page } = await open();
+  await page.evaluate(() => {
+    const m = state.mails.find(x => x.account === state.activeAccount && x.folder === 'inbox');
+    state.filters = [{ id: 'flLeer', name: 'Leer', on: true, match: 'any', rules: [{ field: 'subject', op: 'contains', value: m.subject }], actions: [{ type: 'move', value: 'f-gibts-nicht' }, { type: 'label', value: 'l-gibts-nicht' }] }];
+    runFilters();
+  });
+  assert((await toastText(page)).includes('Keine Nachricht entsprach'), `Toast: ${await toastText(page)}`);
+});
+
 /* ---- Einstellungen / Theme ---- */
 test('theme: Dunkel/Hell/Automatisch wirkt und bleibt nach Neuladen', async () => {
   const { page, issues } = await open({ colorScheme: 'light' });
