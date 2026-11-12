@@ -97,11 +97,19 @@ fn kontakt_mit_unbekanntem_buch_wird_gespeichert() -> TestResult {
     Ok(())
 }
 
+/// Löschschutz unter Konkurrenz: Hat das Buch bereits einen Kontakt, muss jeder parallele
+/// Löschversuch abgelehnt werden, während andere Threads weitere Kontakte speichern.
+///
+/// Bewusst NICHT geprüft: „am Ende verweist kein Kontakt auf ein fehlendes Buch“. `save_contact`
+/// prüft die Existenz des Buchs absichtlich nicht (siehe TODO in `Api::save_contact`); ein Kontakt,
+/// der nach dem Löschen eines leeren Buchs gespeichert wird, ist daher zulässig. Eine frühere
+/// Fassung dieses Tests forderte das trotzdem und schlug unter Last zufällig fehl.
 #[test]
-fn loeschen_und_speichern_parallel_verwaist_keine_kontakte() -> TestResult {
+fn loeschen_wird_unter_konkurrenz_verweigert_solange_kontakte_existieren() -> TestResult {
     for runde in 0..20 {
         let api = std::sync::Arc::new(Api::new());
         api.save_address_book(book("b1", "Kunden")?)?;
+        api.save_contact(contact("p-start", "b1")?)?;
         let mut handles = Vec::new();
         for t in 0..4 {
             let api = std::sync::Arc::clone(&api);
@@ -115,22 +123,39 @@ fn loeschen_und_speichern_parallel_verwaist_keine_kontakte() -> TestResult {
         }
         let deleter = {
             let api = std::sync::Arc::clone(&api);
-            std::thread::spawn(move || -> Result<(), String> {
+            std::thread::spawn(move || -> Result<usize, String> {
                 let b1 = id("b1").map_err(|e| e.to_string())?;
+                let mut abgelehnt = 0_usize;
                 for _ in 0..200 {
-                    // Fehler (nicht leer / schon gelöscht) sind erlaubt.
-                    let _ = api.delete_address_book(&b1);
+                    match api.delete_address_book(&b1) {
+                        Err(AppError::InvalidInput("adressbuch nicht leer")) => {
+                            abgelehnt = abgelehnt.saturating_add(1);
+                        }
+                        Ok(()) => return Err("Buch mit Kontakten wurde gelöscht".to_owned()),
+                        Err(other) => return Err(format!("unerwarteter Fehler: {other:?}")),
+                    }
                 }
-                Ok(())
+                Ok(abgelehnt)
             })
         };
         for h in handles {
             h.join().map_err(|_| "thread panic")??;
         }
-        deleter.join().map_err(|_| "thread panic")??;
-        let buch_da = !api.list_address_books()?.is_empty();
-        let verweise = api.list_contacts()?.iter().any(|c| c.book.as_str() == "b1");
-        assert!(buch_da || !verweise, "Runde {runde}: verwaiste Kontakte");
+        let abgelehnt = deleter.join().map_err(|_| "thread panic")??;
+        assert_eq!(
+            abgelehnt, 200,
+            "Runde {runde}: nicht jeder Löschversuch abgelehnt"
+        );
+        assert_eq!(
+            api.list_address_books()?.len(),
+            1,
+            "Runde {runde}: Buch fehlt"
+        );
+        assert_eq!(
+            api.list_contacts()?.len(),
+            201,
+            "Runde {runde}: Kontakte verloren"
+        );
     }
     Ok(())
 }
