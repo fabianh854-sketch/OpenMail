@@ -570,8 +570,7 @@ known('filter: Operator „ist“ vergleicht den ganzen Wert, nicht einzelne Wö
     eq(hit, false, '„ist lena“ trifft „Lena Hoffmann“');
   });
 
-known('filter: Löschen eines Zielordners lässt keine Filter auf den gelöschten Ordner zurück',
-  'deleteFolder bereinigt state.filters nicht; runFilters verschiebt Nachrichten danach in die nicht mehr existierende Ordner-ID – sie verschwinden aus allen Ansichten',
+test('filter: Löschen eines Zielordners lässt keine Filter auf den gelöschten Ordner zurück',
   async () => {
     const { page } = await open();
     const folderId = await page.evaluate(() => {
@@ -581,11 +580,57 @@ known('filter: Löschen eines Zielordners lässt keine Filter auf den gelöschte
       deleteFolder(f.id);
       return f.id;
     });
+    assert((await dialog(page).innerText()).includes('1 Filter verschiebt künftig ins Archiv.'), 'Dialog nennt den Filter nicht');
     await clickDialogButton(page, 'Löschen');
+    eq(await page.evaluate(() => state.filters.find(f => f.id === 'flE2E').actions[0].value), 'archive', 'Filter zeigt nicht auf das Archiv');
+    assert((await toastText(page)).includes('1 Filter verschiebt künftig ins Archiv'), 'Toast nennt den Filter nicht');
     await page.evaluate(() => runFilters());
     const lost = await page.evaluate(() => state.mails.filter(m => !SYSTEM_FOLDERS.some(f => f.id === m.folder) && !state.folders.some(f => f.id === m.folder)).length);
     eq(lost, 0, `Nachrichten in gelöschtem Ordner ${folderId}`);
   });
+
+test('filter: Löschen einer Kategorie entfernt deren Aktionen; leere Filter werden gelöscht', async () => {
+  const { page } = await open({ init: () => { window.__calls = []; window.__TAURI__ = { core: { invoke: async (c, a) => { window.__calls.push([c, a]); return 'ok'; } } }; } });
+  const labelId = await page.evaluate(() => {
+    const id = state.labels[0].id;
+    state.filters.push(
+      { id: 'flNur', name: 'Nur Kategorie', on: true, match: 'any', rules: [{ field: 'subject', op: 'contains', value: 'x' }], actions: [{ type: 'label', value: id }] },
+      { id: 'flMehr', name: 'Kategorie und Stern', on: true, match: 'any', rules: [{ field: 'subject', op: 'contains', value: 'x' }], actions: [{ type: 'label', value: id }, { type: 'star', value: '' }] });
+    persist();
+    deleteLabel(id);
+    return id;
+  });
+  const text = await dialog(page).innerText();
+  assert(text.includes('1 Filter wird gelöscht') && text.includes('1 Filter verliert'), `Dialog nennt Filter nicht: ${text}`);
+  await clickDialogButton(page, 'Löschen');
+  const r = await page.evaluate(() => ({ ids: state.filters.map(f => f.id), mehr: state.filters.find(f => f.id === 'flMehr')?.actions, calls: window.__calls.filter(c => c[0] === 'save_filter' || c[0] === 'delete_filter').map(c => [c[0], c[1].id ?? c[1].filter.id]) }));
+  assert(!r.ids.includes('flNur'), 'Filter ohne Aktion nicht gelöscht');
+  eq(JSON.stringify(r.mehr), JSON.stringify([{ type: 'star', value: '' }]), `Aktionen von flMehr (Kategorie ${labelId})`);
+  assert(r.calls.some(c => c[0] === 'delete_filter' && c[1] === 'flNur'), `delete_filter fehlt: ${JSON.stringify(r.calls)}`);
+  assert(r.calls.some(c => c[0] === 'save_filter' && c[1] === 'flMehr'), `save_filter fehlt: ${JSON.stringify(r.calls)}`);
+});
+
+test('filter: veralteter Zielordner aus altem Zustand wird übersprungen, Nachricht bleibt im Posteingang', async () => {
+  const { page } = await open();
+  const r = await page.evaluate(() => {
+    const m = state.mails.find(x => x.account === state.activeAccount && x.folder === 'inbox');
+    state.filters.push({ id: 'flAlt', name: 'Alt', on: true, match: 'any', rules: [{ field: 'subject', op: 'contains', value: m.subject }], actions: [{ type: 'move', value: 'f-gibts-nicht' }] });
+    runFilters();
+    return { folder: findMail(m.id).folder };
+  });
+  eq(r.folder, 'inbox', 'Nachricht verschoben');
+});
+
+test('filter: unbekannte Kategorie wird nicht an die Nachricht gehängt', async () => {
+  const { page } = await open();
+  const r = await page.evaluate(() => {
+    const m = state.mails.find(x => x.account === state.activeAccount && x.folder === 'inbox');
+    state.filters.push({ id: 'flKat', name: 'Alt', on: true, match: 'any', rules: [{ field: 'subject', op: 'contains', value: m.subject }], actions: [{ type: 'label', value: 'l-gibts-nicht' }] });
+    runFilters();
+    return findMail(m.id).labels;
+  });
+  assert(!r.includes('l-gibts-nicht'), `Unbekannte Kategorie angehängt: ${r}`);
+});
 
 /* ---- Einstellungen / Theme ---- */
 test('theme: Dunkel/Hell/Automatisch wirkt und bleibt nach Neuladen', async () => {

@@ -3145,18 +3145,24 @@ async function renameFolder(id) {
 async function deleteFolder(id) {
   const folder = state.folders.find(f => f.id === id);
   const count = state.mails.filter(m => m.folder === id).length;
+  const hits = state.filters.filter(f => f.actions.some(a => a.type === 'move' && a.value === id));
+  const filterNote = hits.length ? ` ${hits.length} Filter ${plural(hits.length, 'verschiebt', 'verschieben')} künftig ins Archiv.` : '';
   const ok = await askConfirm({
     title: `Ordner „${folder.name}“ löschen?`,
-    message: count ? `${count} ${plural(count, 'Nachricht wird', 'Nachrichten werden')} in den Papierkorb verschoben.` : 'Der leere Ordner wird entfernt.',
+    message: (count ? `${count} ${plural(count, 'Nachricht wird', 'Nachrichten werden')} in den Papierkorb verschoben.` : 'Der leere Ordner wird entfernt.') + filterNote,
     confirm: 'Löschen', danger: true,
   });
   if (!ok) return;
+  for (const f of hits) {
+    for (const a of f.actions) if (a.type === 'move' && a.value === id) a.value = 'archive';
+    commit('save_filter', { filter: f });
+  }
   for (const m of state.mails) if (m.folder === id) m.folder = 'trash';
   state.folders = state.folders.filter(f => f.id !== id);
   if (state.view.folder === id) { state.view.folder = 'inbox'; resetSelection(); }
   persist();
   render();
-  toast(`Ordner „${folder.name}“ gelöscht`);
+  toast(`Ordner „${folder.name}“ gelöscht${filterNote}`);
 }
 
 async function createLabel(applyTo = []) {
@@ -3180,14 +3186,26 @@ async function editLabel(id) {
 
 async function deleteLabel(id) {
   const label = labelById(id);
-  const ok = await askConfirm({ title: `Kategorie „${label.name}“ löschen?`, message: 'Die Kategorie wird von allen Nachrichten entfernt. Die Nachrichten selbst bleiben erhalten.', confirm: 'Löschen', danger: true });
+  const hits = state.filters.filter(f => f.actions.some(a => a.type === 'label' && a.value === id));
+  const dropped = hits.filter(f => f.actions.every(a => a.type === 'label' && a.value === id));
+  const changed = hits.length - dropped.length;
+  const filterNote = [
+    dropped.length ? `${dropped.length} ${plural(dropped.length, 'Filter wird', 'Filter werden')} gelöscht, weil ${plural(dropped.length, 'er', 'sie')} nur diese Kategorie setzen` : '',
+    changed ? `${changed} ${plural(changed, 'Filter verliert', 'Filter verlieren')} die Aktion „Kategorie“` : '',
+  ].filter(Boolean).map(t => ` ${t}.`).join('');
+  const ok = await askConfirm({ title: `Kategorie „${label.name}“ löschen?`, message: `Die Kategorie wird von allen Nachrichten entfernt. Die Nachrichten selbst bleiben erhalten.${filterNote}`, confirm: 'Löschen', danger: true });
   if (!ok) return;
+  for (const f of hits) {
+    f.actions = f.actions.filter(a => !(a.type === 'label' && a.value === id));
+    if (f.actions.length) commit('save_filter', { filter: f });
+    else { state.filters = state.filters.filter(x => x !== f); commit('delete_filter', { id: f.id }); }
+  }
   for (const m of state.mails) m.labels = m.labels.filter(l => l !== id);
   state.labels = state.labels.filter(l => l.id !== id);
   if (state.view.folder === `label:${id}`) { state.view.folder = 'inbox'; resetSelection(); }
   persist();
   render();
-  toast(`Kategorie „${label.name}“ gelöscht`);
+  toast(`Kategorie „${label.name}“ gelöscht${filterNote}`);
 }
 
 async function emptyTrash() {
@@ -4816,12 +4834,19 @@ function ruleMatches(m, rule) {
   return hay.includes(needle);
 }
 
+// Liefert true, wenn die Aktion angewendet wurde; veraltete Ziele (gelöschter Ordner/Kategorie) werden übersprungen.
 function applyFilterAction(m, action) {
-  if (action.type === 'move' && action.value) m.folder = action.value;
-  else if (action.type === 'label' && action.value && !m.labels.includes(action.value)) m.labels.push(action.value);
-  else if (action.type === 'star') m.starred = true;
+  if (action.type === 'move') {
+    const ok = ['archive', 'spam', 'trash'].includes(action.value) || state.folders.some(f => f.id === action.value && f.account === m.account);
+    if (!ok) return false;
+    m.folder = action.value;
+  } else if (action.type === 'label') {
+    if (!labelById(action.value)) return false;
+    if (!m.labels.includes(action.value)) m.labels.push(action.value);
+  } else if (action.type === 'star') m.starred = true;
   else if (action.type === 'read') m.read = true;
   else if (action.type === 'delete') m.folder = 'trash';
+  return true;
 }
 
 function runFilters() {
@@ -4831,8 +4856,9 @@ function runFilters() {
     for (const f of active) {
       const hits = f.rules.map(r => ruleMatches(m, r));
       if (!(f.match === 'all' ? hits.every(Boolean) : hits.some(Boolean))) continue;
-      touched++;
-      for (const a of f.actions) applyFilterAction(m, a);
+      let applied = false;
+      for (const a of f.actions) if (applyFilterAction(m, a)) applied = true;
+      if (applied) touched++;
       if (m.folder !== 'inbox') break;
     }
   }
